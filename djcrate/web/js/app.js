@@ -104,13 +104,14 @@ function renderStrip(s) {
   const spText = sp.connected ? "Spotify connected" : sp.client_id_set ? "Spotify disconnected" : "Spotify not set up";
   const libDot = lib.status === "ok" ? (lib.read_only ? "warn" : "ok") : "bad";
   const libText = lib.status === "ok" ? (lib.read_only ? "Library read-only" : "Library OK") : "Library not found";
-  const toolsOk = s.tools.ffmpeg && s.tools.ytdlp && !s.queue.outdated;
-  const toolsText = !s.tools.ffmpeg ? "ffmpeg missing" : !s.tools.ytdlp ? "yt-dlp broken" : s.queue.outdated ? "yt-dlp needs update" : "Downloader OK";
+  const toolsOk = s.tools.ffmpeg && s.tools.ytdlp && s.tools.js && !s.queue.outdated;
+  const toolsText = !s.tools.ffmpeg ? "ffmpeg missing" : !s.tools.ytdlp ? "yt-dlp broken" : s.queue.outdated ? "yt-dlp needs update"
+    : !s.tools.js ? "JS runtime missing" : "Downloader OK";
   document.getElementById("status-strip").replaceChildren(
     h("span", { class: "pill clickable", title: sp.connected ? "Logged in" : "Click to set up / log in", onclick: () => showTab("settings") },
       h("span", { class: `dot ${spDot}` }), spText),
     h("span", { class: "pill", title: lib.path || "" }, h("span", { class: `dot ${libDot}` }), libText),
-    h("span", { class: "pill clickable", title: `ffmpeg ${s.tools.ffmpeg ? "found" : "missing"} · yt-dlp ${s.tools.ytdlp || "?"}`, onclick: () => showTab("settings") },
+    h("span", { class: "pill clickable", title: `ffmpeg ${s.tools.ffmpeg ? "found" : "missing"} · yt-dlp ${s.tools.ytdlp || "?"} · JS runtime ${s.tools.js || "missing"}`, onclick: () => showTab("settings") },
       h("span", { class: `dot ${toolsOk ? "ok" : "warn"}` }), toolsText),
   );
 }
@@ -126,6 +127,10 @@ function renderBanners(s) {
   }
   if (!s.tools.ffmpeg) {
     b.push(h("div", { class: "banner bad" }, "ffmpeg isn't installed, so downloads are paused. In Terminal run ", h("code", {}, "brew install ffmpeg"), ", then",
+      h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); poll(); } }, "Re-check")));
+  }
+  if (!s.tools.js) {
+    b.push(h("div", { class: "banner warn" }, "yt-dlp has no JavaScript runtime, so YouTube downloads may miss formats or fail. In Terminal run ", h("code", {}, "brew install deno"), ", then",
       h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); poll(); } }, "Re-check")));
   }
   if (s.queue.outdated) {

@@ -84,6 +84,11 @@ export async function showSettings() {
     h("div", { class: "line" }, "ffmpeg: ", s.ffmpeg ? h("span", { style: { color: "var(--green)" } }, `found (${s.ffmpeg})`) : h("span", { style: { color: "var(--red)" } }, "not found — run brew install ffmpeg"),
       h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); showSettings(); } }, "Re-check")),
     h("div", { class: "line" }, "yt-dlp: ", h("code", {}, s.ytdlp || "not working"), updateBtn),
+    h("div", { class: "line" }, "JavaScript runtime: ", s.js_runtime
+      ? h("span", { style: { color: "var(--green)" } }, `${s.js_runtime} (${s.js_runtime_path})`)
+      : h("span", { style: { color: "var(--red)" } }, "not found — run brew install deno"),
+      h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); showSettings(); } }, "Re-check")),
+    h("p", { class: "muted small" }, "YouTube needs yt-dlp to run a bit of JavaScript. Without Deno or Node, some audio formats go missing and downloads fail more often."),
     h("p", { class: "muted small" }, "YouTube changes things often. If downloads start failing, Update yt-dlp usually fixes it."),
     h("div", { class: "line" }, "Use cookies from browser: ", browser),
     h("p", { class: "muted small" }, "Only needed for age-restricted videos or “confirm you're not a bot” errors. Uses your logged-in YouTube session from that browser."),

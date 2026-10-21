@@ -109,7 +109,7 @@ def status():
     out = {
         "version": __version__,
         "library": lib,
-        "tools": {"ffmpeg": tools.ffmpeg_dir() is not None, "ytdlp": tools.ytdlp_version()},
+        "tools": {"ffmpeg": tools.ffmpeg_dir() is not None, "ytdlp": tools.ytdlp_version(), "js": tools.js_runtime()},
         "spotify": {"client_id_set": False, "connected": False, "login": dict(spotify.login_result),
                     "progress": spotify.progress.get("text", "")},
         "queue": {"paused_reason": downloads.paused_reason, "queued": 0, "running": 0, "failed": 0,
@@ -1018,6 +1018,8 @@ def get_settings(conn=Depends(get_conn)):
         "log_dir": str(LOG_DIR),
         "ffmpeg": tools.ffmpeg_dir(),
         "ytdlp": tools.ytdlp_version(),
+        "js_runtime": tools.js_runtime(),
+        "js_runtime_path": tools.which(tools.js_runtime()) if tools.js_runtime() else None,
         "backups": backup.list_backups(state),
     }
 

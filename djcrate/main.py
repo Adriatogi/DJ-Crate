@@ -96,6 +96,22 @@ class JsApi:
         os.execv(sys.executable, [sys.executable, "-m", "djcrate.main", *sys.argv[1:]])
 
 
+def macos_branding():
+    """Show "DJ Crate" + our icon in the Dock/menu bar instead of "Python"."""
+    try:
+        from AppKit import NSApplication, NSImage
+        from Foundation import NSBundle, NSProcessInfo
+        info = NSBundle.mainBundle().infoDictionary()
+        info["CFBundleName"] = APP_NAME
+        info["CFBundleDisplayName"] = APP_NAME
+        NSProcessInfo.processInfo().setProcessName_(APP_NAME)
+        icon = Path(__file__).parent / "web" / "icon.png"
+        if icon.exists():
+            NSApplication.sharedApplication().setApplicationIconImage_(NSImage.alloc().initWithContentsOfFile_(str(icon)))
+    except Exception:
+        log.exception("Couldn't set app name/icon (cosmetic only)")
+
+
 ERROR_PAGE = """<!doctype html><meta charset=utf-8>
 <body style="background:#121214;color:#eee;font:15px -apple-system,sans-serif;padding:40px">
 <h2 style="color:#ff6b6b">DJ Crate can't start</h2><p>{message}</p></body>"""
@@ -151,6 +167,7 @@ def main():
                 server_thread.join(1)
         else:
             import webview
+            macos_branding()
             api = JsApi()
             window = webview.create_window(
                 APP_NAME, url, js_api=api, width=1440, height=900, min_size=(1000, 640),
