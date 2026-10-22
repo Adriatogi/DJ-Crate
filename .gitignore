@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.claude/
+# Local listening tests (copyrighted audio, never commit)
+testing_sound/
