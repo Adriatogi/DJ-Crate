@@ -58,25 +58,44 @@ export async function showSettings() {
     h("p", { class: "muted small" }, "Your login is stored in the macOS Keychain, not in the library folder."));
 
   // ---- Library
-  const libraryCard = card("Library folder",
+  const libName = h("input", { value: s.library_name, style: { width: "260px" } });
+  libName.addEventListener("change", async () => {
+    try { await patch("/api/settings", { library_name: libName.value }); toast("Renamed.", { type: "success" }); emit("poll"); } catch (e) { errorToast(e); }
+  });
+  const askBox = h("input", { type: "checkbox", class: "sel", checked: s.ask_on_launch });
+  askBox.addEventListener("change", () => post("/api/library/prefs", { ask_on_launch: askBox.checked }).catch(errorToast));
+  const libraryCard = card("Library",
     h("p", {}, "One folder holds every MP3 plus DJ Crate's data (", h("code", {}, ".djcrate/"), "). Import this folder in Rekordbox. To move to a new Mac, copy this folder."),
+    h("div", { class: "line" }, "Name: ", libName),
     h("div", { class: "line" }, h("code", {}, s.library_path)),
     h("div", { class: "line" },
       h("button", { class: "btn", onclick: () => post("/api/reveal", { target: "library" }) }, "Show in Finder"),
       h("button", {
         class: "btn", onclick: async () => {
-          const p = await native.pickFolder("New library folder:");
-          if (!p) return;
-          if (!(await confirmDialog("Switch library?", `Open ${p} as your library? If it has no DJ Crate data yet, it starts empty. Your current library is untouched.`, { ok: "Switch" }))) return;
-          try { await post("/api/library/choose", { path: p }); location.reload(); } catch (e) { errorToast(e); }
+          try { await post("/api/library/switch"); emit("show-tab", "crates"); emit("poll"); } catch (e) { errorToast(e); }
         },
       }, "Switch library…"),
-      h("button", { class: "btn", onclick: () => emit("rescan") }, "Rescan for missing files")));
+      h("button", { class: "btn", onclick: () => emit("rescan") }, "Rescan for missing files")),
+    h("label", { class: "row gap", style: { cursor: "pointer", marginTop: "6px" } }, askBox, "Ask which library to open when DJ Crate starts"),
+    h("p", { class: "muted small" }, "Each library has its own music, crates, notes and Spotify login — handy when several people share this Mac."));
 
   // ---- Downloads
   const browser = h("select", {}, s.cookie_browsers.map((b) => h("option", { value: b, selected: b === s.cookies_browser }, b ? b[0].toUpperCase() + b.slice(1) : "Off")));
   browser.addEventListener("change", async () => {
     try { await patch("/api/settings", { cookies_browser: browser.value }); toast("Saved.", { type: "success" }); } catch (e) { errorToast(e); }
+  });
+  const aheadInput = h("input", { type: "number", min: "0", max: String(s.search_ahead_max), value: String(s.search_ahead), style: { width: "70px" } });
+  aheadInput.addEventListener("change", async () => {
+    const n = Number(aheadInput.value);
+    if (!Number.isInteger(n) || n < 0 || n > s.search_ahead_max) {
+      aheadInput.classList.add("invalid");
+      toast(`${s.search_ahead_max} max — searching further ahead makes YouTube rate-limit you (it can block downloads too). Not saved.`, { type: "error", timeout: 8000 });
+      aheadInput.value = String(s.search_ahead);
+      setTimeout(() => aheadInput.classList.remove("invalid"), 2500);
+      return;
+    }
+    try { await patch("/api/settings", { search_ahead: n }); s.search_ahead = n; toast(n ? `Searching ${n} song${n === 1 ? "" : "s"} ahead.` : "Searching ahead is off.", { type: "success" }); }
+    catch (e) { errorToast(e); aheadInput.value = String(s.search_ahead); }
   });
   const updateBtn = h("button", { class: "btn" }, "Update yt-dlp");
   updateBtn.onclick = () => updateYtdlp(updateBtn).then(showSettings);
@@ -90,6 +109,8 @@ export async function showSettings() {
       h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); showSettings(); } }, "Re-check")),
     h("p", { class: "muted small" }, "YouTube needs yt-dlp to run a bit of JavaScript. Without Deno or Node, some audio formats go missing and downloads fail more often."),
     h("p", { class: "muted small" }, "YouTube changes things often. If downloads start failing, Update yt-dlp usually fixes it."),
+    h("div", { class: "line" }, "Search ahead: ", aheadInput, " songs", h("span", { class: "muted small" }, `(0 = off, max ${s.search_ahead_max})`)),
+    h("p", { class: "muted small" }, "When you open Find on a song, DJ Crate quietly searches the next few songs too, so theirs open instantly. More than 10 gets you rate-limited by YouTube."),
     h("div", { class: "line" }, "Use cookies from browser: ", browser),
     h("p", { class: "muted small" }, "Only needed for age-restricted videos or “confirm you're not a bot” errors. Uses your logged-in YouTube session from that browser."),
     h("p", { class: "muted small" }, "Files are saved as “Title - Artist.mp3” (MP3, constant 192 kbps — steady cue points on CDJs) in the library folder."));

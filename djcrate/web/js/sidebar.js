@@ -5,7 +5,7 @@ import { emit, findCrate, store } from "./store.js";
 import { confirmDialog, errorToast, h, menu, promptDialog, toast } from "./ui.js";
 
 const SMART_ICONS = {
-  all: "◉", needs_link: "🔗", ready: "⬇", downloaded: "✓", cleaned: "🟡", verified: "🟢", check_version: "⚠", missing: "!",
+  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", ready: "🟢", broken: "🔴", check_version: "⚠", missing: "!",
 };
 
 const collapsed = new Set(JSON.parse(localStorage.getItem("djc.collapsed") || "[]"));
@@ -25,7 +25,7 @@ export function renderSidebar() {
   },
     h("span", { class: "icon" }, SMART_ICONS[s.key] || "•"),
     h("span", { class: "name" }, s.name),
-    h("span", { class: "count" }, ["check_version", "missing"].includes(s.key) && !s.count ? "" : s.count),
+    h("span", { class: "count" }, ["check_version", "missing", "broken"].includes(s.key) && !s.count ? "" : s.count),
   )));
   document.getElementById("tree").replaceChildren(...data.tree.map(renderNode));
 }
@@ -33,7 +33,7 @@ export function renderSidebar() {
 function statsLine(c) {
   const s = c.stats;
   if (!s.total) return "empty";
-  return `${s.downloaded}/${s.total} ↓ · ${s.cleaned} cleaned · ${s.verified} verified`;
+  return `${s.downloaded}/${s.total} ↓ · ${s.ready} ready${s.broken ? ` · ${s.broken} broken` : ""}`;
 }
 
 function renderNode(c) {

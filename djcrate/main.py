@@ -17,9 +17,9 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from . import APP_NAME, backup, library
-from .api import app, downloads, hooks
-from .config import get_port, load_config, setup_logging
+from . import APP_NAME, backup, libraries, library
+from .api import app, downloads, hooks, search_ahead
+from .config import get_port, setup_logging
 from .state import state
 
 log = logging.getLogger("djcrate.main")
@@ -39,6 +39,9 @@ def probe_existing(port: int) -> bool:
 
 def port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Same option the server uses: a port still cooling down from the last
+        # run (TIME_WAIT) is fine to reuse; only a live listener counts as taken.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return True
@@ -145,10 +148,15 @@ def main():
         sys.exit(1)
 
     state.on_opened.append(on_library_opened)
-    lib = load_config().get("library_path")
-    if lib:
-        state.open(Path(lib))
+    # Several people can share DJ Crate: by default it asks which library to
+    # open (with "Don't ask again" to always open the last one).
+    last = libraries.last_library()
+    if last and not libraries.ask_on_launch():
+        state.open(last)
+    elif libraries.describe(None):
+        state.status = "choose_library"
     downloads.start()
+    search_ahead.start()
     threading.Thread(target=backup_loop, name="backups", daemon=True).start()
 
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", log_config=None))

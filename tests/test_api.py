@@ -15,14 +15,14 @@ def test_crates_folders_and_shared_metadata(client):
     t = mk(client, title="Strobe", artists="deadmau5", crate_id=a)
     client.post(f"/api/crates/{b}/tracks", json={"ids": [t["id"]]})
     # A change in one crate shows in the other: it's the same row.
-    client.patch(f"/api/tracks/{t['id']}", json={"notes": "drop at 1:04", "cleaned": True})
+    client.patch(f"/api/tracks/{t['id']}", json={"notes": "drop at 1:04", "ready": True})
     tb = client.get(f"/api/tracks?view=crate:{b}").json()["tracks"][0]
-    assert tb["notes"] == "drop at 1:04" and tb["cleaned"]
+    assert tb["notes"] == "drop at 1:04" and tb["ready"]
     # Folder view shows its crates' songs
     assert len(client.get(f"/api/tracks?view=crate:{folder}").json()["tracks"]) == 1
     side = client.get("/api/sidebar").json()
     assert side["smart"][0] == {"key": "all", "name": "All Tracks", "count": 1}
-    assert side["tree"][0]["stats"]["cleaned"] == 1
+    assert side["tree"][0]["stats"]["ready"] == 1
     # Can't move a folder into itself
     assert client.patch(f"/api/crates/{folder}", json={"move": True, "parent_id": folder}).status_code == 400
     # Deleting a crate never deletes songs
@@ -40,7 +40,7 @@ def test_link_validation_and_duplicate_warning(client):
     r = client.patch(f"/api/tracks/{t2['id']}", json={"source_url": url}).json()
     assert "already used" in r["warnings"][0] and r["track"]["source_url"] == url
     smart = {s["key"]: s["count"] for s in client.get("/api/sidebar").json()["smart"]}
-    assert smart["ready"] == 2 and smart["needs_link"] == 0
+    assert smart["to_download"] == 2 and smart["needs_link"] == 0
 
 
 def test_remove_from_crate_with_undo(client):
@@ -109,32 +109,6 @@ def test_folder_import(client, lib, make_mp3, tmp_path):
     assert again["imported"] == 0 and again["already_known"] == 1
 
 
-def test_delete_from_library_trashes_and_keeps_set_label(client, lib, make_mp3, monkeypatch):
-    trashed = []
-    monkeypatch.setattr("djcrate.library.send2trash", lambda p: trashed.append(p))
-    t = mk(client, title="Gone", artists="X")
-    mp3 = make_mp3(lib.library / "Gone - X.mp3")
-    lib.conn().execute("UPDATE tracks SET file_rel_path = ?, download_status = 'done' WHERE id = ?", (lib.rel_path(mp3), t["id"]))
-    sid = client.post("/api/sets", json={"name": "S"}).json()["id"]
-    client.put(f"/api/sets/{sid}/items", json={"items": [{"track_id": t["id"]}]})
-    assert client.post("/api/tracks/delete", json={"ids": [t["id"]]}).json()["deleted"] == 1
-    assert trashed == [str(mp3)]
-    item = client.get(f"/api/sets/{sid}").json()["items"][0]
-    assert item["track_id"] is None and item["label"] == "Gone — X"
-
-
-def test_set_setter_and_export(client):
-    t = mk(client, title="Strobe", artists="deadmau5")
-    sid = client.post("/api/sets", json={"name": "Friday"}).json()["id"]
-    client.patch(f"/api/sets/{sid}", json={"notes": "Start slow"})
-    items = [{"track_id": t["id"], "cue_time": "1:04", "transition_note": "echo out"}, {"free_text": "mic break"}]
-    assert len(client.put(f"/api/sets/{sid}/items", json={"items": items}).json()["items"]) == 2
-    text = client.get(f"/api/sets/{sid}/export").json()["text"]
-    assert "SET: Friday" in text and "Strobe — deadmau5" in text and "mic break" in text and "Transition: echo out" in text
-    snap = client.delete(f"/api/sets/{sid}").json()["snapshot"]
-    assert client.get("/api/sets").json()["sets"] == []
-    new_id = client.post("/api/sets/restore", json={"snapshot": snap}).json()["id"]
-    assert len(client.get(f"/api/sets/{new_id}").json()["items"]) == 2
 
 
 def test_read_only_blocks_writes(client, lib):
@@ -145,7 +119,7 @@ def test_read_only_blocks_writes(client, lib):
 
 
 def test_unexpected_errors_are_reported(client, lib, monkeypatch):
-    monkeypatch.setattr("djcrate.api.set_text", lambda d: 1 / 0)
+    monkeypatch.setattr("djcrate.setboard.set_text", lambda d: 1 / 0)
     from fastapi.testclient import TestClient
     from djcrate.api import app
     c = TestClient(app, raise_server_exceptions=False)
@@ -154,16 +128,6 @@ def test_unexpected_errors_are_reported(client, lib, monkeypatch):
     assert r.status_code == 500 and "Activity" in r.json()["error"]["message"]
     assert c.get("/api/status").json()["errors_count"] >= 1
 
-
-def test_set_length_override_changes_total(client):
-    t = mk(client, title="Consequences", artists="Ken")
-    from djcrate.state import state
-    state.conn().execute("UPDATE tracks SET duration_ms = 183000 WHERE id = ?", (t["id"],))
-    sid = client.post("/api/sets", json={"name": "S"}).json()["id"]
-    items = client.put(f"/api/sets/{sid}/items", json={"items": [{"track_id": t["id"], "length_ms": 119000}]}).json()["items"]
-    assert items[0]["length_ms"] == 119000
-    text = client.get(f"/api/sets/{sid}/export").json()["text"]
-    assert "1:59 total" in text and "plays 1:59 of 3:03" in text
 
 
 def test_upgrade_from_v1_backs_up_first(tmp_path):
@@ -185,4 +149,58 @@ def test_upgrade_from_v1_backs_up_first(tmp_path):
     assert list((lib / ".djcrate" / "backups").glob("pre-migration-v1-*.db"))
     cols = [r[1] for r in st.conn().execute("PRAGMA table_info(set_items)")]
     assert "length_ms" in cols
+    st.release_lock()
+
+
+def test_multiple_libraries_switch_and_picker(client, lib, tmp_path, monkeypatch):
+    from djcrate import libraries
+    monkeypatch.setattr(libraries, "LIBRARIES_DIR", tmp_path / "Libraries")
+    first = lib.library
+    mk(client, title="Mine", artists="A")
+    r = client.post("/api/library/new", json={"name": "Sam"}).json()
+    assert r["library"]["status"] == "ok" and r["library"]["name"] == "Sam"
+    assert client.get("/api/tracks?view=smart:all").json()["tracks"] == []  # Sam's library is empty
+    libs = client.get("/api/libraries").json()["libraries"]
+    assert [l["name"] for l in libs][:2] == ["Sam", first.name]
+    assert next(l for l in libs if l["path"] == str(first))["tracks"] == 1
+    # switching goes back to the picker; downloads block it
+    assert client.post("/api/library/switch").json()["library"]["status"] == "choose_library"
+    assert client.get("/api/sidebar").status_code == 409
+    client.post("/api/library/choose", json={"path": str(first)})
+    assert [t["title"] for t in client.get("/api/tracks?view=smart:all").json()["tracks"]] == ["Mine"]
+    client.post("/api/library/prefs", json={"ask_on_launch": False})
+    assert libraries.ask_on_launch() is False and libraries.last_library() == first
+    # forgetting removes it from the list but never deletes the folder
+    sam = tmp_path / "Libraries" / "Sam"
+    client.post("/api/library/forget", json={"path": str(sam)})
+    assert sam.is_dir() and all(l["path"] != str(sam) for l in client.get("/api/libraries").json()["libraries"])
+    assert client.post("/api/library/new", json={"name": "Sam"}).status_code == 400  # folder already has data
+
+
+def test_switch_blocked_while_downloading(client, lib):
+    t = mk(client, title="A", source_url="https://youtu.be/x")
+    client.post("/api/downloads", json={"ids": [t["id"]]})
+    r = client.post("/api/library/switch")
+    assert r.status_code == 400 and r.json()["error"]["code"] == "busy"
+
+
+def test_upgrade_turns_verified_into_ready(tmp_path):
+    import sqlite3
+    from djcrate import db
+    from djcrate.state import AppState
+    lib = tmp_path / "Old"
+    (lib / ".djcrate").mkdir(parents=True)
+    conn = sqlite3.connect(lib / ".djcrate" / "djcrate.db")
+    conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    for migration in db.MIGRATIONS[:2]:
+        for stmt in [x for x in migration.split(";") if x.strip()]:
+            conn.execute(stmt)
+    conn.execute("INSERT INTO schema_version VALUES (2)")
+    conn.execute("INSERT INTO tracks (title, cleaned, verified) VALUES ('A', 1, 1), ('B', 1, 0)")
+    conn.commit()
+    conn.close()
+    st = AppState()
+    st.open(lib)
+    rows = st.conn().execute("SELECT title, ready, broken FROM tracks ORDER BY title").fetchall()
+    assert [tuple(r) for r in rows] == [("A", 1, 0), ("B", 0, 0)]
     st.release_lock()

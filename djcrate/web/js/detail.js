@@ -61,7 +61,7 @@ function render() {
         h("div", { class: "t-title", style: { fontSize: "15px", whiteSpace: "normal" } }, t.title),
         h("div", { class: "muted" }, t.artists),
         t.spotify_url ? h("a", { href: "#", class: "small", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.spotify_url }); } }, "Open in Spotify ↗") : null)),
-    h("div", { class: "flags-row" }, flag("edited", "Edited"), flag("cleaned", "Cleaned"), flag("verified", "Verified")),
+    h("div", { class: "flags-row" }, flag("edited", "Edited"), flag("ready", "Ready"), flag("broken", "Broken")),
     field("Notes", "notes", { multiline: true, placeholder: "Anything about this song — drop at 1:04, vocal comes in late, pairs well with…" }),
     h("div", { class: "muted small", style: { marginTop: "-6px", marginBottom: "10px" } },
       "Notes are also written into the MP3's comment tag, so they show in Rekordbox's Comments column (use Reload Tag there after edits)."),

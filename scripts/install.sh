@@ -7,7 +7,8 @@
 #
 # Installs what's missing (ffmpeg, uv, a JavaScript runtime) with Homebrew,
 # clones the repo to ~/DJ-Crate (override with DJCRATE_DIR), installs Python
-# dependencies, and builds "DJ Crate.app" in ~/Applications.
+# dependencies, and builds "DJ Crate.app" inside that folder. Your library
+# (music + crates) also defaults to a Library/ folder in there.
 
 set -euo pipefail
 
@@ -88,7 +89,8 @@ main() {
   bash "$DEST/scripts/make_app.sh" || fail "Building the app failed."
 
   printf "\n"
-  bold "Done! Open DJ Crate from Spotlight, Launchpad, or ~/Applications."
+  bold "Done! DJ Crate.app is in $DEST — open it from there or Spotlight, and drag it to your Dock."
+  open -R "$DEST/DJ Crate.app" 2>/dev/null || true
   echo "First launch: pick your library folder, then Settings → Spotify to connect your account."
   echo "To update later: $DEST/scripts/update.sh"
 }

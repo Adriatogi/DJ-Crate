@@ -40,6 +40,7 @@ ERROR_MESSAGES = {
     "needs_cookies": "YouTube wants you signed in (age-restricted or bot check). Turn on Settings → Use cookies from browser, then Retry.",
     "ytdlp_outdated": "YouTube changed something and the downloader needs an update. Click Update yt-dlp, then Retry.",
     "transient": "Network problem while downloading.",
+    "rate_limited": "YouTube is rate-limiting you right now — wait a few minutes.",
     "forbidden": "YouTube refused the download (HTTP 403).",
     "ffmpeg_missing": "ffmpeg isn't installed. Run: brew install ffmpeg",
     "disk_full": "Not enough disk space.",
@@ -54,6 +55,7 @@ _PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("disk_full", ("no space left on device", "errno 28")),
     ("ffmpeg_missing", ("ffmpeg not found", "ffprobe and ffmpeg not found", "ffmpeg is not installed")),
     ("invalid_url", ("is not a valid url", "unsupported url")),
+    ("rate_limited", ("http error 429", "too many requests", "rate-limited", "rate limited")),
     ("needs_cookies", (
         "sign in to confirm your age", "age-restricted", "confirm you're not a bot", "confirm you’re not a bot",
         "use --cookies", "cookies-from-browser", "login required", "this video may be inappropriate",
@@ -463,7 +465,7 @@ class DownloadManager:
 
     def _fail(self, job: dict, code: str, detail: str):
         attempts = job["attempts"] + 1
-        retryable = code in ("transient", "forbidden") and attempts <= len(RETRY_DELAYS)
+        retryable = code in ("transient", "forbidden", "rate_limited") and attempts <= len(RETRY_DELAYS)
         if code == "forbidden" and not retryable:
             code = "ytdlp_outdated"
         conn = self.state.conn()

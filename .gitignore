@@ -221,3 +221,7 @@ __marimo__/
 .claude/
 # Local listening tests (copyrighted audio, never commit)
 testing_sound/
+
+# Built app and the default library (your music) live in the repo folder but are never committed
+/DJ Crate.app/
+/Libraries/

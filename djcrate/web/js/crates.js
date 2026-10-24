@@ -12,7 +12,7 @@ let loadSeq = 0;
 
 const SORTS = {
   default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length",
-  added: "Date added", status: "Status", edited: "Edited", cleaned: "Cleaned", verified: "Verified",
+  added: "Date added", status: "Status", edited: "Edited", ready: "Ready", broken: "Broken",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
 store.sort = JSON.parse(localStorage.getItem("djc.sort") || '{"key":"default","dir":1}');
@@ -22,7 +22,7 @@ function sortValue(t, key) {
     case "duration": return t.duration_ms ?? t.file_duration_ms ?? 0;
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
-    case "edited": case "cleaned": case "verified": return t[key] ? 1 : 0;
+    case "edited": case "ready": case "broken": return t[key] ? 1 : 0;
     default: return (t[key] || "").toLowerCase();
   }
 }
@@ -129,17 +129,18 @@ function renderToolbar() {
   document.getElementById("view-name").textContent = name;
   const ts = store.tracks;
   const done = ts.filter((t) => t.download_status === "done").length;
-  const cleaned = ts.filter((t) => t.cleaned).length;
-  const verified = ts.filter((t) => t.verified).length;
-  const meta = [`${ts.length} song${ts.length === 1 ? "" : "s"}`, `${done} downloaded`, `${cleaned} cleaned`, `${verified} verified`];
+  const ready = ts.filter((t) => t.ready).length;
+  const broken = ts.filter((t) => t.broken).length;
+  const meta = [`${ts.length} song${ts.length === 1 ? "" : "s"}`, `${done} downloaded`, `${ready} ready`];
+  if (broken) meta.push(`${broken} broken`);
   if (crate?.kind === "spotify" && crate.last_synced) meta.push(`synced ${crate.last_synced.slice(0, 16)} UTC`);
   if (crate?.kind === "spotify" && crate.spotify_playlist_id === "liked") meta.push("Liked Songs");
   document.getElementById("view-meta").textContent = meta.join(" · ");
   document.getElementById("btn-resync").hidden = crate?.kind !== "spotify";
-  const ready = ts.filter((t) => t.source_url && ["none", "error"].includes(t.download_status)).length;
+  const toDownload = ts.filter((t) => t.source_url && ["none", "error"].includes(t.download_status)).length;
   const dl = document.getElementById("btn-download-all");
-  dl.textContent = ready ? `⬇ Download All (${ready})` : "⬇ Download All";
-  dl.title = ready ? "Download every song here that has a link and isn't downloaded yet" : "Nothing here has a link waiting to download";
+  dl.textContent = toDownload ? `⬇ Download All (${toDownload})` : "⬇ Download All";
+  dl.title = toDownload ? "Download every song here that has a link and isn't downloaded yet" : "Nothing here has a link waiting to download";
 }
 
 async function downloadAll() {

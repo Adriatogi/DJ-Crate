@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds "DJ Crate.app" in ~/Applications so you can launch it from Finder,
-# Spotlight or the Dock. The app just runs this repo's venv python.
+# Builds "DJ Crate.app" inside this folder (next to the code) so you can launch
+# it from Finder, Spotlight or the Dock. The app just runs this repo's venv python.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$HOME/Applications/DJ Crate.app"
+APP="$REPO/DJ Crate.app"
 
 if [ ! -x "$REPO/.venv/bin/python" ]; then
   echo "No .venv yet — run: cd \"$REPO\" && uv sync" >&2

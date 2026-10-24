@@ -34,10 +34,10 @@ def test_dedup_spotify_id_then_isrc_then_name(lib):
 def test_import_never_overwrites_user_edits(lib):
     conn = lib.conn()
     tid, _ = db.upsert_track(conn, {"spotify_id": "sp1", "title": "Strobe", "artists": "deadmau5"})
-    conn.execute("UPDATE tracks SET title = 'My Title', notes = 'n', cleaned = 1 WHERE id = ?", (tid,))
+    conn.execute("UPDATE tracks SET title = 'My Title', notes = 'n', ready = 1 WHERE id = ?", (tid,))
     db.upsert_track(conn, {"spotify_id": "sp1", "title": "Strobe", "artists": "deadmau5", "album": "For Lack"})
     t = db.get_track(conn, tid)
-    assert (t["title"], t["notes"], t["cleaned"], t["album"]) == ("My Title", "n", True, "For Lack")
+    assert (t["title"], t["notes"], t["ready"], t["album"]) == ("My Title", "n", True, "For Lack")
 
 
 def test_plan_resync_flags_never_deletes():

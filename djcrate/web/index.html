@@ -12,6 +12,7 @@
     <div class="brand">DJ Crate</div>
     <nav class="tabs">
       <button class="tab active" data-tab="crates">Crates</button>
+      <button class="tab" data-tab="cutting">Cutting</button>
       <button class="tab" data-tab="sets">Set Setter</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -74,8 +75,8 @@
                 <th class="c-link">YouTube link</th>
                 <th class="c-play"></th>
                 <th class="c-flag sortable" data-sort="edited" title="Edited — you changed the audio on purpose; skips the length check">Edited</th>
-                <th class="c-flag sortable" data-sort="cleaned" title="Cleaned — BPM and grid line up in Rekordbox">Cleaned</th>
-                <th class="c-flag sortable" data-sort="verified" title="Verified — you know this song and it's gig-ready">Verified</th>
+                <th class="c-flag sortable" data-sort="ready" title="Ready — prepped and gig-ready">Ready</th>
+                <th class="c-flag sortable" data-sort="broken" title="Broken — something's wrong with this song and it needs fixing">Broken</th>
                 <th class="c-status sortable" data-sort="status">Status</th>
                 <th class="c-action"></th>
               </tr>
@@ -89,6 +90,7 @@
       <aside id="detail" hidden></aside>
     </div>
 
+    <div id="view-cutting" class="view"></div>
     <div id="view-sets" class="view"></div>
     <div id="view-settings" class="view"></div>
   </main>

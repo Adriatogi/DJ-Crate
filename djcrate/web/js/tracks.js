@@ -88,10 +88,10 @@ function renderEmpty() {
   } else {
     const msgs = {
       "smart:needs_link": "Every song has a link. 🎉",
-      "smart:ready": "Nothing waiting to download.",
+      "smart:to_download": "Nothing waiting to download.",
       "smart:downloaded": "No downloads yet.",
-      "smart:cleaned": "Nothing marked Cleaned yet.",
-      "smart:verified": "Nothing marked Verified yet.",
+      "smart:ready": "Nothing marked Ready yet.",
+      "smart:broken": "Nothing marked Broken. 👍",
       "smart:check_version": "No length mismatches — every download matches its Spotify length (or is marked Edited).",
       "smart:missing": "No missing files.",
     };
@@ -107,7 +107,16 @@ function coverEl(t) {
 }
 
 function rowFor(t) {
-  const tr = h("tr", { class: `track${t.removed_from_source ? " removed" : ""}`, dataset: { id: t.id } });
+  const tr = h("tr", { class: `track${t.removed_from_source ? " removed" : ""}${t.broken ? " broken-song" : ""}`, dataset: { id: t.id } });
+  // Only the cover, title and artist open the song card (rows are easy to misclick).
+  const opens = (td) => {
+    td.classList.add("opens");
+    td.addEventListener("click", (e) => {
+      if (e.target.closest("input, button, a")) return;
+      emit("open-detail", t.id);
+    });
+    return td;
+  };
   const sel = h("input", { type: "checkbox", class: "sel", checked: selected.has(t.id), title: "Select" });
   sel.addEventListener("change", () => {
     sel.checked ? selected.add(t.id) : selected.delete(t.id);
@@ -117,18 +126,18 @@ function rowFor(t) {
 
   tr.append(
     h("td", { class: "c-sel" }, sel),
-    h("td", { class: "c-cover" }, coverEl(t)),
-    h("td", { title: t.title },
+    opens(h("td", { class: "c-cover", title: "Open song details" }, coverEl(t))),
+    opens(h("td", { title: `${t.title}\nClick to open song details` },
       h("div", { class: "t-title" }, t.title),
-      t.removed_from_source ? h("span", { class: "chip removed", title: "Removed from the Spotify playlist. Kept here with your notes and file." }, "Removed on Spotify") : null),
-    h("td", { title: t.artists }, t.artists),
+      t.removed_from_source ? h("span", { class: "chip removed", title: "Removed from the Spotify playlist. Kept here with your notes and file." }, "Removed on Spotify") : null)),
+    opens(h("td", { class: "artist", title: `${t.artists}\nClick to open song details` }, t.artists)),
     h("td", { class: "c-album muted", title: t.album }, t.album),
     h("td", { class: "c-time muted" }, fmtMs(t.duration_ms ?? t.file_duration_ms)),
     h("td", { class: "c-link" }, linkCell(t)),
     h("td", { class: "c-play" }, playButton(t, tr)),
     h("td", { class: "c-flag" }, flag(t, "edited")),
-    h("td", { class: "c-flag" }, flag(t, "cleaned")),
-    h("td", { class: "c-flag" }, flag(t, "verified")),
+    h("td", { class: "c-flag" }, flag(t, "ready")),
+    h("td", { class: "c-flag" }, flag(t, "broken")),
     h("td", { class: "c-status" }, statusCell(t)),
     h("td", { class: "c-action" }, actionButton(t)),
   );
@@ -143,10 +152,6 @@ function rowFor(t) {
     e.dataTransfer.setData("text/plain", drag.ids.length > 1 ? `${drag.ids.length} songs` : t.title);
   });
   tr.addEventListener("dragend", () => { drag.type = null; });
-  tr.addEventListener("click", (e) => {
-    if (e.target.closest("input, button, a, select, textarea, label")) return;
-    emit("open-detail", t.id);
-  });
   if (store.detailId === t.id) tr.classList.add("open");
   return tr;
 }
@@ -187,8 +192,8 @@ function linkCell(t) {
 function flag(t, field) {
   const titles = {
     edited: "Edited — you changed the audio on purpose (skips the length check)",
-    cleaned: "Cleaned — BPM and grid line up in Rekordbox",
-    verified: "Verified — learned and gig-ready",
+    ready: "Ready — prepped and gig-ready",
+    broken: "Broken — something's wrong with this song and it needs fixing (say what in its notes)",
   };
   const cb = h("input", { type: "checkbox", class: `flag ${field}`, checked: !!t[field], title: titles[field] });
   cb.addEventListener("change", async () => {
@@ -351,11 +356,11 @@ function renderBulkbar() {
     { label: "Edited ✓", fn: () => bulk(ids, "edited", true) },
     { label: "Edited ✕", fn: () => bulk(ids, "edited", false) },
     "-",
-    { label: "Cleaned ✓", fn: () => bulk(ids, "cleaned", true) },
-    { label: "Cleaned ✕", fn: () => bulk(ids, "cleaned", false) },
+    { label: "Ready ✓", fn: () => bulk(ids, "ready", true) },
+    { label: "Ready ✕", fn: () => bulk(ids, "ready", false) },
     "-",
-    { label: "Verified ✓", fn: () => bulk(ids, "verified", true) },
-    { label: "Verified ✕", fn: () => bulk(ids, "verified", false) },
+    { label: "Broken ✓", fn: () => bulk(ids, "broken", true) },
+    { label: "Broken ✕", fn: () => bulk(ids, "broken", false) },
   ]);
   const addBtn = h("button", { class: "btn small" }, "Add to crate ▾");
   addBtn.onclick = () => {
@@ -436,25 +441,46 @@ async function openFind(t, anchor, input) {
   if (isPopoverOpenFor(anchor)) return closePopover();
   const box = h("div", { class: "find" });
   popover(anchor, box, { align: "right" });
-  const load = async () => {
+  const load = async (refresh = false) => {
     box.replaceChildren(h("div", { class: "head" }, h("span", { class: "spinner" }), ` Searching YouTube for “${t.artists} - ${t.title}”…`));
     try {
-      const r = await get(`/api/tracks/${t.id}/yt_search`);
+      const r = await get(`/api/tracks/${t.id}/yt_search${refresh ? "?refresh=1" : ""}`);
       if (!box.isConnected) return;
-      renderFind(box, t, r, input);
+      renderFind(box, t, r, input, () => load(true));
+      searchAhead(t);
     } catch (e) {
       if (!box.isConnected) return;
       fill(box,
-        h("div", { class: "head", style: { color: "var(--red)" } }, `Search failed: ${e.message}`),
+        h("div", { class: "head", style: { color: e.code === "rate_limited" ? "var(--yellow)" : "var(--red)" } },
+          e.code === "rate_limited" ? `Rate-limited by YouTube. ${e.message}` : `Search failed: ${e.message}`),
         h("div", { class: "foot" },
-          h("button", { class: "btn small", onclick: load }, "Retry"),
+          h("button", { class: "btn small", onclick: () => load() }, "Retry"),
           e.extra?.search_url ? h("button", { class: "btn small", onclick: () => post("/api/open_url", { url: e.extra.search_url }) }, "Open YouTube search ↗") : null));
     }
   };
   load();
 }
 
-function renderFind(box, t, r, input) {
+// Quietly search the next songs in on-screen order that still need a link, so
+// their Find opens instantly. The server caps this at the Search ahead setting.
+function searchAhead(t) {
+  const i = store.tracks.findIndex((x) => x.id === t.id);
+  if (i < 0) return;
+  const next = store.tracks.slice(i + 1).filter((x) => !x.source_url && x.download_status !== "done").slice(0, 10).map((x) => x.id);
+  if (next.length) post("/api/yt_search/ahead", { ids: next }).catch(() => {});
+}
+
+function ago(ts) {
+  const mins = Math.round((Date.now() / 1000 - ts) / 60);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function renderFind(box, t, r, input, refresh) {
   const items = r.results.map((res) => {
     let lengthNote = null;
     if (res.diff_ms !== null && res.diff_ms !== undefined) {
@@ -478,7 +504,9 @@ function renderFind(box, t, r, input) {
     h("div", { class: "head" }, `Results for “${r.query}” · Spotify length ${fmtMs(t.duration_ms)}. Pick the right one — green means the length matches.`),
     items.length ? items : h("div", { class: "head" }, "No results."),
     h("div", { class: "foot" },
-      h("span", { class: "muted small" }, "Not here?"),
+      r.cached_at
+        ? h("span", { class: "muted small" }, `Saved results · ${ago(r.cached_at)} · `, h("a", { href: "#", onclick: (e) => { e.preventDefault(); refresh(); } }, "Search again"))
+        : h("span", { class: "muted small" }, "Not here?"),
       h("button", { class: "btn small", onclick: () => post("/api/open_url", { url: r.search_url }) }, "Open YouTube search ↗")),
   );
 }
