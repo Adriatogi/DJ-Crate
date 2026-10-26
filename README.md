@@ -100,6 +100,7 @@ Every song has its own **board**, a node editor with the song in the middle:
 - **To make one,** drag from a song's **●** onto another song, or onto empty space to pick one, then write the note. You can also use **+ Connect a song…**.
 - **Steps 1 · 2 · 3** shows the songs your song connects to as faded "ghost" nodes, then their connections, and so on. Double-click a ghost to open its board.
 - **Samples:** on the right, add what a song samples. It can be text, or a link to another song in your library, which shows as a dotted line, plus a "Sampled by" list.
+- **Find samples (Genius):** looks up what a song samples, interpolates, or was sampled in, and you tick which ones to keep. Songs in your library are linked; the rest are saved as text, and you can link them later (a "Link →" button shows up once the song is in your library). To get a sample into your library, add it to a Spotify playlist and import it. Setup: make a free API client at genius.com/api-clients, click "Generate Access Token", and paste it in Settings → Genius. **WhoSampled ↗** opens WhoSampled's search in your browser (it has no public API).
 - Drag nodes around and DJ Crate remembers the layout. **Tidy up** resets it.
 - To remove something, select a note or wire and press **Delete**.
 

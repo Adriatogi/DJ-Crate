@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, backup, cutting, db, libraries, library, setboard, spotify, tags, tools, yt_search
+from . import __version__, backup, cutting, db, genius, libraries, library, setboard, spotify, tags, tools, yt_search
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -117,6 +117,7 @@ def status():
                   "interrupted": 0, "outdated": 0},
         "errors_count": len(state.app_errors),
         "search": {"paused_until": search_ahead.paused_until if search_ahead.paused else None},
+        "genius": {"configured": False},
     }
     if state.status in ("db_corrupt", "migration_failed"):
         out["backups"] = backup.list_backups(state)
@@ -127,6 +128,7 @@ def status():
             lib["name"] = db.get_setting(conn, "library_name") or (state.library.name if state.library else None)
             out["spotify"]["client_id_set"] = bool(client_id)
             out["spotify"]["connected"] = spotify_connected(client_id, db.get_setting(conn, "library_id"))
+            out["genius"]["configured"] = genius.configured(db.get_setting(conn, "library_id"))
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
@@ -154,6 +156,7 @@ def spotify_connected(client_id: str, owner: str | None) -> bool:
 def _on_library_opened():
     # A different library means a different Spotify login.
     _connected_cache.clear()
+    genius._configured.clear()
     spotify._me_cache.clear()
     spotify.cancel_login()
 
@@ -1130,12 +1133,58 @@ def add_sample(track_id: int, body: SampleBody, conn=Depends(get_conn)):
 
 
 class SamplePatch(BaseModel):
-    text: str
+    text: str | None = None
+    sample_track_id: int | None = None
+    unlink: bool = False
 
 
 @app.patch("/api/samples/{sample_id}")
 def update_sample(sample_id: int, body: SamplePatch, conn=Depends(get_conn)):
-    cutting.update_sample(conn, sample_id, body.text)
+    link = None if body.unlink else (body.sample_track_id if body.sample_track_id is not None else cutting.UNSET)
+    cutting.update_sample(conn, sample_id, body.text, link)
+    return {"ok": True}
+
+
+@app.get("/api/tracks/{track_id}/samples")
+def get_samples(track_id: int, conn=Depends(get_conn)):
+    return cutting.samples_of(conn, track_id)
+
+
+# ---------------------------------------------------------------- genius (sample lookup)
+
+@app.get("/api/tracks/{track_id}/genius")
+def genius_suggestions(track_id: int, refresh: bool = False, genius_id: int | None = None, conn=Depends(get_conn)):
+    owner = _owner(conn)
+    return genius.suggestions(conn, lambda: genius.Client(genius.load_token(owner)), track_id,
+                              refresh=refresh, genius_id=genius_id)
+
+
+class GeniusApplyBody(BaseModel):
+    items: list[dict]
+
+
+@app.post("/api/tracks/{track_id}/genius/apply")
+def genius_apply(track_id: int, body: GeniusApplyBody, conn=Depends(get_conn)):
+    return {"added": genius.apply(conn, track_id, body.items), **cutting.samples_of(conn, track_id)}
+
+
+class TokenBody(BaseModel):
+    token: str
+
+
+@app.put("/api/genius/token")
+def genius_token(body: TokenBody, conn=Depends(get_conn)):
+    token = body.token.strip()
+    if not token:
+        raise AppError("bad_token", "Paste the access token from your Genius API client.")
+    genius.check_token(token)
+    genius.save_token(_owner(conn), token)
+    return {"ok": True}
+
+
+@app.delete("/api/genius/token")
+def genius_logout(conn=Depends(get_conn)):
+    genius.clear_token(_owner(conn))
     return {"ok": True}
 
 

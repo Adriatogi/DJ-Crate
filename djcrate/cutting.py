@@ -6,6 +6,7 @@ one-way and shared by every board. A song's *board* is that song in the middle
 with everything it connects to (1–3 steps out) around it.
 """
 
+import re
 from collections import deque
 
 from . import db
@@ -127,33 +128,127 @@ def mixes_from(conn, track_id: int) -> list[dict]:
 
 # ---------------------------------------------------------------- samples
 
+_FEAT = re.compile(r"\s*[(\[](feat|ft|featuring|with)\.?\s[^)\]]*[)\]]", re.I)
+_VERSION = re.compile(r"\s*[(\[][^)\]]*\b(remaster(ed)?|version|edit|mono|stereo|deluxe)\b[^)\]]*[)\]]", re.I)
+_DASH_VERSION = re.compile(r"\s+-\s+[^-]*\b(remaster(ed)?|version|edit|mono|stereo|deluxe)\b.*$", re.I)
+
+
+def clean_title(title: str) -> str:
+    """'Stronger - Remastered 2011' / 'Song (feat. X)' → 'stronger' / 'song'."""
+    t = _FEAT.sub("", title or "")
+    t = _VERSION.sub("", t)
+    t = _DASH_VERSION.sub("", t)
+    return db.normalize(t)
+
+
+def artist_matches(track_artists: str, artist: str) -> bool:
+    """Spotify writes "A, B" and Genius "A & B", so compare names as words."""
+    a, g = f" {db.normalize(track_artists)} ", db.normalize(artist)
+    if g and f" {g} " in a:
+        return True
+    first = db.normalize((track_artists or "").split(",")[0])
+    return bool(first) and f" {first} " in f" {g} "
+
+
+class LibraryIndex:
+    """Find library songs by title + artist (for linking samples)."""
+
+    def __init__(self, conn):
+        self.by_title: dict[str, list] = {}
+        for r in conn.execute("SELECT id, title, artists FROM tracks"):
+            self.by_title.setdefault(clean_title(r["title"]), []).append(r)
+
+    def find(self, title: str, artist: str) -> int | None:
+        for r in self.by_title.get(clean_title(title), []):
+            if artist_matches(r["artists"], artist):
+                return r["id"]
+        return None
+
+
+def split_label(label: str) -> tuple[str, str]:
+    title, _, artist = (label or "").partition(" — ")
+    return title, artist
+
+
 def samples_of(conn, track_id: int) -> dict:
+    """What a song samples, and what it was sampled in.
+
+    A row normally lives on the song that does the sampling. "Sampled in" a song
+    you don't have is kept on *this* song instead (direction 'in', text only).
+    """
     rows = conn.execute("SELECT * FROM samples WHERE track_id = ? ORDER BY position, id", (track_id,)).fetchall()
+    out_rows = [r for r in rows if r["direction"] != "in"]
+    in_rows = [r for r in rows if r["direction"] == "in"]
     by = conn.execute("SELECT * FROM samples WHERE sample_track_id = ? ORDER BY id", (track_id,)).fetchall()
-    info = briefs(conn, [r["sample_track_id"] for r in rows] + [r["track_id"] for r in by])
+    # Text samples with a "Title — Artist" label might be in the library by now.
+    labelled = [r for r in rows if not r["sample_track_id"] and " — " in r["sample_label"]]
+    index = LibraryIndex(conn) if labelled else None
+    matches = {}
+    for r in labelled:
+        m = index.find(*split_label(r["sample_label"]))
+        if m and m != track_id:
+            matches[r["id"]] = m
+    info = briefs(conn, [r["sample_track_id"] for r in rows] + [r["track_id"] for r in by] + list(matches.values()))
     return {
-        "samples": [{**dict(r), "song": info.get(r["sample_track_id"])} for r in rows],
-        "sampled_by": [{**dict(r), "song": info.get(r["track_id"])} for r in by],
+        "samples": [{**dict(r), "song": info.get(r["sample_track_id"]), "match": info.get(matches.get(r["id"]))} for r in out_rows],
+        "sampled_by": [{**dict(r), "song": info.get(r["track_id"]), "match": None} for r in by]
+                      + [{**dict(r), "song": None, "match": info.get(matches.get(r["id"]))} for r in in_rows],
     }
 
 
-def add_sample(conn, track_id: int, sample_track_id: int | None, text: str) -> dict:
-    text = (text or "").strip()
-    if not sample_track_id and not text:
+def add_sample(conn, track_id: int, sample_track_id: int | None, text: str, *,
+               label: str = "", url: str = "", relation: str = "sample", direction: str = "out") -> dict:
+    text, label = (text or "").strip(), (label or "").strip()
+    if not sample_track_id and not text and not label:
         raise AppError("bad_sample", "Pick a song or type what it samples.")
     if sample_track_id == track_id:
         raise AppError("bad_sample", "A song can't sample itself.")
+    if direction == "in" and sample_track_id:
+        # Sampled in a library song: store it the normal way round.
+        add_sample(conn, sample_track_id, track_id, text, url=url, relation=relation)
+        return samples_of(conn, track_id)
     _require_tracks(conn, [track_id] + ([sample_track_id] if sample_track_id else []))
     with db.tx(conn):
         pos = conn.execute("SELECT coalesce(max(position), -1) + 1 FROM samples WHERE track_id = ?", (track_id,)).fetchone()[0]
-        conn.execute("INSERT INTO samples (track_id, sample_track_id, sample_label, text, position) VALUES (?, ?, ?, ?, ?)",
-                     (track_id, sample_track_id, label_of(conn, sample_track_id) if sample_track_id else "", text, pos))
+        conn.execute("INSERT INTO samples (track_id, sample_track_id, sample_label, text, position, url, relation, direction) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (track_id, sample_track_id, label_of(conn, sample_track_id) if sample_track_id else label, text, pos,
+                      url or "", relation if relation in ("sample", "interpolation") else "sample",
+                      "in" if direction == "in" else "out"))
     return samples_of(conn, track_id)
 
 
-def update_sample(conn, sample_id: int, text: str) -> None:
+UNSET = object()
+
+
+def update_sample(conn, sample_id: int, text: str | None = None, sample_track_id=UNSET) -> None:
+    """Edit the note, or link a text sample to a library song (None = unlink, keeping its label)."""
+    row = conn.execute("SELECT * FROM samples WHERE id = ?", (sample_id,)).fetchone()
+    if not row:
+        raise AppError("not_found", "That sample doesn't exist anymore.", 404)
     with db.tx(conn):
-        conn.execute("UPDATE samples SET text = ? WHERE id = ?", ((text or "").strip(), sample_id))
+        if text is not None:
+            conn.execute("UPDATE samples SET text = ? WHERE id = ?", (text.strip(), sample_id))
+        if sample_track_id is UNSET:
+            return
+        if sample_track_id is None:
+            conn.execute("UPDATE samples SET sample_track_id = NULL WHERE id = ?", (sample_id,))
+            return
+        if sample_track_id == row["track_id"]:
+            raise AppError("bad_sample", "A song can't sample itself.")
+        _require_tracks(conn, [sample_track_id])
+        if row["direction"] == "in":
+            # "Sampled in X" and X is in the library now: X becomes the sampler.
+            me = row["track_id"]
+            if conn.execute("SELECT 1 FROM samples WHERE track_id = ? AND sample_track_id = ?", (sample_track_id, me)).fetchone():
+                conn.execute("DELETE FROM samples WHERE id = ?", (sample_id,))
+                return
+            pos = conn.execute("SELECT coalesce(max(position), -1) + 1 FROM samples WHERE track_id = ?", (sample_track_id,)).fetchone()[0]
+            conn.execute("UPDATE samples SET track_id = ?, sample_track_id = ?, sample_label = ?, direction = 'out', position = ? "
+                         "WHERE id = ?", (sample_track_id, me, label_of(conn, me), pos, sample_id))
+        else:
+            conn.execute("UPDATE samples SET sample_track_id = ?, sample_label = ? WHERE id = ?",
+                         (sample_track_id, label_of(conn, sample_track_id), sample_id))
 
 
 def delete_sample(conn, sample_id: int) -> None:

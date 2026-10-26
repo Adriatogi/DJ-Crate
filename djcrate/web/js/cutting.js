@@ -4,9 +4,10 @@
 
 import { del, get, patch, post, put } from "./api.js";
 import { Board, noteBody, songBody } from "./board.js";
+import { songCard } from "./detail.js";
 import { songPicker } from "./pickers.js";
-import { emit, readOnly, store } from "./store.js";
-import { confirmDialog, debounce, errorToast, fill, fmtMs, h, toast } from "./ui.js";
+import { emit, on, readOnly } from "./store.js";
+import { confirmDialog, debounce, errorToast, fill, h, toast } from "./ui.js";
 
 const COL_W = 560, ROW_H = 112, MIX_ROW_H = 150;
 
@@ -18,6 +19,9 @@ let board = null;
 let sideSong = null;    // song shown in the right panel
 let pendingEdit = null; // mix id whose note should open for editing after reload
 const root = () => document.getElementById("view-cutting");
+
+// Another tab asked for a song's board (e.g. a linked sample on a Crates card).
+on("cutting-focus", (id) => { if (root().querySelector(".cutting-main")) focus(id); else { center = id; localStorage.setItem("djc.cut.center", id); } });
 
 export async function showCutting() {
   if (!root().querySelector(".cutting-main")) build();
@@ -323,7 +327,7 @@ async function resetLayout() {
   try { await del(`/api/cutting/board/${center}/layout`); loadBoard({ fit: true }); } catch (e) { errorToast(e); }
 }
 
-// ------------------------------------------------ side panel: details + samples
+// ------------------------------------------------ side panel: the song card (same one as Crates)
 
 async function renderSide(trackId) {
   const panel = document.getElementById("cut-side");
@@ -333,63 +337,16 @@ async function renderSide(trackId) {
     try { t = (await get(`/api/cutting/board/${trackId}?depth=1`)).center; } catch (e) { return errorToast(e); }
   }
   if (!t || sideSong !== trackId) return;
-  const status = { none: t.source_url ? "Has a link" : "Needs a link", queued: "Queued", downloading: "Downloading", done: "Downloaded", error: "Download failed", missing: "File missing" }[t.download_status] || t.download_status;
-  const sampleInput = h("button", { class: "btn small", disabled: readOnly() }, "+ Add sample");
-  sampleInput.onclick = () => songPicker(sampleInput, {
-    title: `What does “${t.title}” sample?`, allowText: true,
-    textHint: "Pick a song from your library to link it, or type anything (e.g. “drum break from Impeach the President”) and press Enter.",
-    onPick: async (song, text) => {
-      try {
-        await post(`/api/tracks/${t.id}/samples`, song ? { sample_track_id: song.id } : { text });
-        await loadBoard();
-        loadList(root().querySelector(".cutting-list input").value);
-      } catch (e) { errorToast(e); }
+  // Don't wipe the card while you're typing in it.
+  if (panel.dataset.id === String(t.id) && panel.contains(document.activeElement) && document.activeElement.matches("input, textarea")) return;
+  panel.dataset.id = t.id;
+  fill(panel, songCard(t, {
+    extra: trackId === center ? null : h("button", { class: "btn small", style: { marginTop: "6px" }, onclick: () => focus(trackId) }, "Open its board"),
+    openSong: focus, openTitle: "Open its board",
+    onSaved: () => loadBoard(),
+    onSamplesChange: async () => {
+      await loadBoard();
+      loadList(root().querySelector(".cutting-list input").value);
     },
-  });
-  const chip = (s, linked, label) => h("span", {
-    class: `sample-chip${linked ? " link" : ""}`, title: linked ? "Open its board" : "",
-    onclick: linked ? () => focus(linked) : null,
-  }, label, h("button", {
-    title: "Remove", onclick: async (e) => {
-      e.stopPropagation();
-      await del(`/api/samples/${s.id}`).catch(errorToast);
-      loadBoard();
-    },
-  }, "✕"));
-  fill(panel,
-    h("div", { class: "detail-head" },
-      t.cover_url ? h("img", { src: t.cover_url, alt: "" }) : h("div", { class: "cover placeholder" }, "♪"),
-      h("div", {},
-        h("div", { class: "t-title", style: { fontSize: "15px", whiteSpace: "normal" } }, t.title),
-        h("div", { class: "muted" }, t.artists),
-        trackId === center ? null : h("button", { class: "btn small", style: { marginTop: "6px" }, onclick: () => focus(trackId) }, "Open its board"))),
-    h("div", { class: "kv" },
-      h("div", { class: "k" }, "Album"), h("div", { class: "v" }, t.album || "–"),
-      h("div", { class: "k" }, "Length"), h("div", { class: "v" }, fmtMs(t.duration_ms ?? t.file_duration_ms)),
-      h("div", { class: "k" }, "Status"), h("div", { class: "v" }, status),
-      h("div", { class: "k" }, "Flags"), h("div", { class: "v" }, [t.edited ? "Edited" : null, t.ready ? "Ready ✓" : null, t.broken ? "Broken !" : null].filter(Boolean).join(" · ") || "–"),
-      t.source_url ? [h("div", { class: "k" }, "Link"), h("div", { class: "v" },
-        h("a", { href: "#", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.source_url }); } }, "Open ↗"))] : null),
-    t.notes ? [h("div", { class: "section-title" }, "Notes"), h("div", { style: { whiteSpace: "pre-wrap", fontSize: "12.5px" } }, t.notes)] : null,
-    h("button", { class: "btn small", style: { marginTop: "8px" }, onclick: () => editInCrates(t.id) }, "Edit in Crates"),
-    h("div", { class: "section-title" }, "Samples"),
-    h("div", {}, t.samples.length
-      ? t.samples.map((s) => chip(s, s.sample_track_id, [s.song ? `${s.song.title} — ${s.song.artists}` : s.sample_label, s.text].filter(Boolean).join(" · ")))
-      : h("div", { class: "muted small", style: { marginBottom: "6px" } }, "Nothing yet.")),
-    sampleInput,
-    t.sampled_by.length ? [h("div", { class: "section-title" }, "Sampled by"),
-      h("div", {}, t.sampled_by.map((s) => h("span", { class: "sample-chip link", onclick: () => focus(s.track_id) }, `${s.song?.title} — ${s.song?.artists}`)))] : null,
-  );
-}
-
-function editInCrates(trackId) {
-  emit("show-tab", "crates");
-  emit("select-view", "smart:all");
-  let tries = 0;
-  const wait = setInterval(() => {
-    if (store.tracks.some((t) => t.id === trackId) || ++tries > 30) {
-      clearInterval(wait);
-      emit("open-detail", trackId);
-    }
-  }, 100);
+  }));
 }

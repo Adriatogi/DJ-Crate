@@ -1,6 +1,6 @@
 // Settings tab: Spotify, library, downloads/tools, backups, logs.
 
-import { get, native, patch, post } from "./api.js";
+import { del, get, native, patch, post, put } from "./api.js";
 import { emit, store } from "./store.js";
 import { confirmDialog, copyText, errorToast, h, modal, toast } from "./ui.js";
 
@@ -56,6 +56,35 @@ export async function showSettings() {
       h("li", {}, "Open the app's Settings, copy the ", h("b", {}, "Client ID"), ", paste it here, Save, then Log in.")),
     h("div", { class: "line" }, cid, saveCid, loginBtn),
     h("p", { class: "muted small" }, "Your login is stored in the macOS Keychain, not in the library folder."));
+
+  // ---- Genius (sample lookup)
+  const gConnected = !!store.status?.genius?.configured;
+  const gToken = h("input", { placeholder: gConnected ? "Saved — paste a new one to replace it" : "Paste your access token", spellcheck: false });
+  const saveToken = h("button", { class: "btn" }, "Save");
+  saveToken.onclick = async () => {
+    saveToken.disabled = true;
+    try {
+      await put("/api/genius/token", { token: gToken.value });
+      toast("Genius connected.", { type: "success" });
+      emit("poll");
+      setTimeout(showSettings, 300);
+    } catch (e) { errorToast(e); } finally { saveToken.disabled = false; }
+  };
+  const geniusCard = card("Genius (sample lookup)",
+    h("p", {}, gConnected ? "● Connected." : "Not set up yet."),
+    h("ol", {},
+      h("li", {}, "Go to ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: "https://genius.com/api-clients" }); } }, "genius.com/api-clients"),
+        " and log in (a free Genius account is fine)."),
+      h("li", {}, "New API Client → any name (e.g. “DJ Crate”), App Website URL ", h("code", {}, "http://127.0.0.1"), ", Save."),
+      h("li", {}, "Click ", h("b", {}, "Generate Access Token"), ", copy it, paste it here and Save.")),
+    h("div", { class: "line" }, gToken, saveToken,
+      gConnected ? h("button", {
+        class: "btn", onclick: async () => {
+          try { await del("/api/genius/token"); emit("poll"); setTimeout(showSettings, 300); } catch (e) { errorToast(e); }
+        },
+      }, "Disconnect") : null),
+    h("p", { class: "muted small" }, "Used by Find samples in Cutting: Genius lists what a song samples and what sampled it. WhoSampled has no public API, so its button just opens the website."),
+    h("p", { class: "muted small" }, "Your token is stored in the macOS Keychain, not in the library folder."));
 
   // ---- Library
   const libName = h("input", { value: s.library_name, style: { width: "260px" } });
@@ -139,7 +168,7 @@ export async function showSettings() {
     h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")),
     h("p", { class: "muted small" }, `DJ Crate ${store.status?.version || ""}`));
 
-  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, libraryCard, downloadsCard, backupsCard, troubleCard));
+  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, libraryCard, downloadsCard, backupsCard, troubleCard));
 }
 
 export async function updateYtdlp(btn) {

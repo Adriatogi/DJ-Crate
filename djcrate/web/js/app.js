@@ -131,6 +131,8 @@ function renderStrip(s) {
   document.getElementById("status-strip").replaceChildren(
     h("span", { class: "pill clickable", title: sp.connected ? "Logged in" : "Click to set up / log in", onclick: () => showTab("settings") },
       h("span", { class: `dot ${spDot}` }), spText),
+    h("span", { class: "pill clickable", title: s.genius?.configured ? "Used by Find samples in Cutting" : "Click to set up (free) for Find samples", onclick: () => showTab("settings") },
+      h("span", { class: `dot ${s.genius?.configured ? "ok" : "off"}` }), s.genius?.configured ? "Genius connected" : "Genius not set up"),
     h("span", { class: "pill clickable", title: `${lib.path || ""}\nClick to switch library`, onclick: switchLibrary }, h("span", { class: `dot ${libDot}` }), libText),
     h("span", { class: "pill clickable", title: `ffmpeg ${s.tools.ffmpeg ? "found" : "missing"} · yt-dlp ${s.tools.ytdlp || "?"} · JS runtime ${s.tools.js || "missing"}`, onclick: () => showTab("settings") },
       h("span", { class: `dot ${toolsOk ? "ok" : "warn"}` }), toolsText),

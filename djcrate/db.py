@@ -222,6 +222,24 @@ def _v4_boards(conn) -> None:
 
 MIGRATIONS.append(_v4_boards)  # v4
 
+MIGRATIONS.append(  # v5: sample lookup (Genius)
+    """
+    ALTER TABLE samples ADD COLUMN url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE samples ADD COLUMN relation TEXT NOT NULL DEFAULT 'sample';
+    CREATE TABLE genius_cache (
+        track_id   INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        genius_id  INTEGER,
+        match_json TEXT NOT NULL,
+        song_json  TEXT,
+        fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """
+)
+
+MIGRATIONS.append(  # v6: "sampled in" songs you don't have, kept as text on the sampled song
+    "ALTER TABLE samples ADD COLUMN direction TEXT NOT NULL DEFAULT 'out';"
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 CHECK_VERSION_SQL = (

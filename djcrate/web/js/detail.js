@@ -1,6 +1,9 @@
-// Right-hand song panel: edit metadata + notes (written into the MP3's tags).
+// The song card: edit metadata, notes (written into the MP3's tags), flags and
+// samples. One card for the whole app: the Crates side panel, and Cutting's
+// right panel (via songCard).
 
 import { patch, post } from "./api.js";
+import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
 import { errorToast, fill, fmtDiff, fmtMs, h, toast } from "./ui.js";
 import { relocateTrack, updateTrack } from "./tracks.js";
@@ -30,7 +33,19 @@ function render() {
   panel.hidden = false;
   if (panel.contains(document.activeElement) && panel.dataset.id === String(t.id)) return; // don't clobber typing
   panel.dataset.id = t.id;
+  fill(panel, songCard(t, {
+    onClose: closeDetail,
+    // A linked sample: open its card if it's in this list, otherwise its Cutting board.
+    openSong: (id) => store.tracks.some((x) => x.id === id) ? openDetail(id) : (emit("cutting-focus", id), emit("show-tab", "cutting")),
+    openTitle: "Open this song",
+  }));
+}
 
+// opts: onClose (shows ✕), extra (nodes under the title), openSong/openTitle
+// (for linked samples), onSaved(track), onSamplesChange().
+export function songCard(t, { onClose = null, extra = null, openSong, openTitle, onSaved = null, onSamplesChange = null } = {}) {
+  const save = (changes, revert) => saveTrack(t, changes, revert, onSaved);
+  const retag = () => retagTrack(t, onSaved);
   const field = (label, key, { multiline = false, placeholder = "" } = {}) => {
     const input = multiline
       ? h("textarea", { rows: 5, placeholder }, t[key] || "")
@@ -51,20 +66,22 @@ function render() {
     ? `${fmtMs(t.file_duration_ms)} (${fmtDiff(t.file_duration_ms - t.duration_ms)} vs Spotify)`
     : fmtMs(t.file_duration_ms);
 
-  fill(panel,
+  return [
     h("div", { class: "row", style: { justifyContent: "space-between", marginBottom: "8px" } },
       h("div", { class: "section-title", style: { margin: 0 } }, "Song"),
-      h("button", { class: "icon-btn", title: "Close (Esc)", onclick: closeDetail }, "✕")),
+      onClose ? h("button", { class: "icon-btn", title: "Close (Esc)", onclick: onClose }, "✕") : null),
     h("div", { class: "detail-head" },
       t.cover_url ? h("img", { src: t.cover_url, alt: "" }) : h("div", { class: "cover placeholder" }, "♪"),
       h("div", {},
         h("div", { class: "t-title", style: { fontSize: "15px", whiteSpace: "normal" } }, t.title),
         h("div", { class: "muted" }, t.artists),
-        t.spotify_url ? h("a", { href: "#", class: "small", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.spotify_url }); } }, "Open in Spotify ↗") : null)),
+        t.spotify_url ? h("a", { href: "#", class: "small", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.spotify_url }); } }, "Open in Spotify ↗") : null,
+        extra)),
     h("div", { class: "flags-row" }, flag("edited", "Edited"), flag("ready", "Ready"), flag("broken", "Broken")),
     field("Notes", "notes", { multiline: true, placeholder: "Anything about this song — drop at 1:04, vocal comes in late, pairs well with…" }),
     h("div", { class: "muted small", style: { marginTop: "-6px", marginBottom: "10px" } },
       "Notes are also written into the MP3's comment tag, so they show in Rekordbox's Comments column (use Reload Tag there after edits)."),
+    samplesSection(t, { openSong, openTitle, onChange: onSamplesChange }),
     h("div", { class: "section-title" }, "Metadata"),
     field("Title", "title"),
     field("Artists (all, including features)", "artists"),
@@ -87,7 +104,7 @@ function render() {
         ? h("button", { class: "btn small", onclick: () => post("/api/reveal", { track_id: t.id }).catch(errorToast) }, "Show in Finder") : null,
       t.file_rel_path ? h("button", { class: "btn small", onclick: () => relocateTrack(t) }, "Relocate…") : null,
       hasFile ? h("button", { class: "btn small", onclick: retag }, t.tag_error ? "Retry tags" : "Rewrite tags") : null),
-  );
+  ];
 }
 
 function statusText(t) {
@@ -98,13 +115,13 @@ function statusText(t) {
   }[t.download_status] || t.download_status;
 }
 
-async function save(changes, revert) {
-  const t = current();
-  if (!t) return;
+async function saveTrack(t, changes, revert, onSaved) {
   try {
     const r = await patch(`/api/tracks/${t.id}`, changes);
     r.warnings.forEach((w) => toast(w, { type: "warn", timeout: 8000 }));
+    Object.assign(t, r.track);
     updateTrack(r.track);
+    onSaved?.(r.track);
     emit("refresh-sidebar");
   } catch (e) {
     revert && revert();
@@ -112,11 +129,11 @@ async function save(changes, revert) {
   }
 }
 
-async function retag() {
-  const t = current();
+async function retagTrack(t, onSaved) {
   try {
     const r = await post(`/api/tracks/${t.id}/retag`);
     updateTrack(r.track);
+    onSaved?.(r.track);
     toast("Tags written.", { type: "success" });
   } catch (e) { errorToast(e); }
 }
