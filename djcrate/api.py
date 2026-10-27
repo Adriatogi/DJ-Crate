@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, backup, cutting, db, genius, libraries, library, setboard, spotify, tags, tools, yt_search
+from . import __version__, backup, cutting, db, genius, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -31,7 +31,7 @@ hooks: dict[str, Any] = {"focus": None}
 
 # Routes that must keep working in read-only mode / without a library.
 READ_ONLY_ALLOWED = (
-    "/api/library/", "/api/reveal", "/api/open_url", "/api/focus", "/api/tools/", "/api/spotify/login",
+    "/api/library/", "/api/reveal", "/api/rekordbox/export/reveal", "/api/open_url", "/api/focus", "/api/tools/", "/api/spotify/login",
     "/api/spotify/cancel_login", "/api/spotify/logout", "/api/backup/export", "/api/errors/clear",
 )
 
@@ -129,6 +129,7 @@ def status():
             out["spotify"]["client_id_set"] = bool(client_id)
             out["spotify"]["connected"] = spotify_connected(client_id, db.get_setting(conn, "library_id"))
             out["genius"]["configured"] = genius.configured(db.get_setting(conn, "library_id"))
+            out["rekordbox"] = rekordbox.status(conn)
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
@@ -1148,6 +1149,62 @@ def update_sample(sample_id: int, body: SamplePatch, conn=Depends(get_conn)):
 @app.get("/api/tracks/{track_id}/samples")
 def get_samples(track_id: int, conn=Depends(get_conn)):
     return cutting.samples_of(conn, track_id)
+
+
+# ---------------------------------------------------------------- rekordbox (BPM & key in, playlists out)
+
+class XmlBody(BaseModel):
+    path: str
+
+
+class ExportBody(BaseModel):
+    on: bool
+
+
+@app.put("/api/rekordbox/xml")
+def rekordbox_set_xml(body: XmlBody, conn=Depends(get_conn)):
+    p = Path(body.path).expanduser()
+    if not p.is_file():
+        raise AppError("not_found", "That file doesn't exist.", 400)
+    try:
+        rekordbox._read_xml(p)
+    except Exception:
+        raise AppError("bad_xml", "That doesn't look like a Rekordbox XML export (File → Export Collection in xml format).", 400)
+    db.set_setting(conn, "rekordbox_xml", str(p))
+    rekordbox.run_import(conn)
+    return rekordbox.status(conn)
+
+
+@app.post("/api/rekordbox/import")
+def rekordbox_import(conn=Depends(get_conn)):
+    if not db.get_setting(conn, "rekordbox_xml"):
+        raise AppError("no_xml", "Choose your Rekordbox XML file first.", 400)
+    rekordbox.run_import(conn)
+    return rekordbox.status(conn)
+
+
+@app.delete("/api/rekordbox/xml")
+def rekordbox_forget_xml(conn=Depends(get_conn)):
+    with db.tx(conn):
+        conn.execute("DELETE FROM settings WHERE key IN ('rekordbox_xml', 'rekordbox_xml_mtime', 'rekordbox_import')")
+    return rekordbox.status(conn)
+
+
+@app.put("/api/rekordbox/export")
+def rekordbox_export(body: ExportBody, conn=Depends(get_conn)):
+    db.set_setting(conn, "rekordbox_export_on", "1" if body.on else "0")
+    if body.on:
+        rekordbox.write_export(state, conn)
+    return rekordbox.status(conn)
+
+
+@app.post("/api/rekordbox/export/reveal")
+def rekordbox_export_reveal(conn=Depends(get_conn)):
+    p = rekordbox.export_path()
+    if not p.exists():
+        rekordbox.write_export(state, conn)
+    tools.reveal(p)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- genius (sample lookup)

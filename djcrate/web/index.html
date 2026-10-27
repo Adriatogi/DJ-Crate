@@ -14,6 +14,7 @@
       <button class="tab active" data-tab="crates">Crates</button>
       <button class="tab" data-tab="cutting">Cutting</button>
       <button class="tab" data-tab="sets">Set Setter</button>
+      <button class="tab" data-tab="docs">Docs</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
     <div class="spacer"></div>
@@ -72,6 +73,8 @@
                 <th class="sortable" data-sort="artists">Artist</th>
                 <th class="c-album sortable" data-sort="album">Album</th>
                 <th class="c-time sortable" data-sort="duration">Time</th>
+                <th class="c-bpm sortable" data-sort="bpm" title="From your Rekordbox export (Settings → Rekordbox)">BPM</th>
+                <th class="c-key sortable" data-sort="musical_key" title="Camelot · musical key, from your Rekordbox export">Key</th>
                 <th class="c-link">YouTube link</th>
                 <th class="c-play"></th>
                 <th class="c-flag sortable" data-sort="edited" title="Edited — you changed the audio on purpose; skips the length check">Edited</th>
@@ -92,6 +95,7 @@
 
     <div id="view-cutting" class="view"></div>
     <div id="view-sets" class="view"></div>
+    <div id="view-docs" class="view"></div>
     <div id="view-settings" class="view"></div>
   </main>
 

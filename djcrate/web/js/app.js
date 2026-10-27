@@ -5,6 +5,7 @@ import { get, native, post } from "./api.js";
 import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
+import { showDocs } from "./docs.js";
 import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
@@ -20,6 +21,7 @@ let activityTimer = null;
 let everConnected = false;
 let openedPath = null;
 let searchPaused = false;
+let lastRekordboxAt;
 
 // ------------------------------------------------ tabs
 
@@ -29,6 +31,7 @@ function showTab(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   if (name === "sets") showSets();
   if (name === "cutting") showCutting();
+  if (name === "docs") showDocs();
   if (name === "settings") showSettings();
   if (name !== "crates") closePlayer();
 }
@@ -83,6 +86,14 @@ async function poll() {
       if (key !== lastQueueKey) refreshSidebar();
     }
     lastQueueKey = key;
+    // Rekordbox re-export picked up by the watcher: refresh BPM & key.
+    const rb = s.rekordbox;
+    if (rb && lastRekordboxAt !== undefined && rb.at && rb.at !== lastRekordboxAt) {
+      if (tab === "crates") refreshTracks();
+      if (tab === "settings") showSettings();
+      toast(rb.error || `Updated BPM & key for ${rb.matched} songs from Rekordbox`, { type: rb.error ? "warn" : "success" });
+    }
+    lastRekordboxAt = rb?.at ?? null;
     if (q.interrupted && !interruptedPrompted) promptInterrupted(q.interrupted);
   }
   const badge = document.getElementById("activity-count");

@@ -6,12 +6,12 @@ import { closeDetail, initDetail } from "./detail.js";
 import { crateMenu, deleteCrate, initSidebar, renderSidebar } from "./sidebar.js";
 import { emit, findCrate, on, store } from "./store.js";
 import { initTracks, renderTracks, resetTable } from "./tracks.js";
-import { debounce, errorToast, menu, toast } from "./ui.js";
+import { debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
 
 let loadSeq = 0;
 
 const SORTS = {
-  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length",
+  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key",
   added: "Date added", status: "Status", edited: "Edited", ready: "Ready", broken: "Broken",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
@@ -20,6 +20,8 @@ store.sort = JSON.parse(localStorage.getItem("djc.sort") || '{"key":"default","d
 function sortValue(t, key) {
   switch (key) {
     case "duration": return t.duration_ms ?? t.file_duration_ms ?? 0;
+    case "bpm": return t.bpm ?? 0;
+    case "musical_key": return keyOrder(t.musical_key);
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
     case "edited": case "ready": case "broken": return t[key] ? 1 : 0;

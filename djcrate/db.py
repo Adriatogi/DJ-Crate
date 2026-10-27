@@ -240,6 +240,13 @@ MIGRATIONS.append(  # v6: "sampled in" songs you don't have, kept as text on the
     "ALTER TABLE samples ADD COLUMN direction TEXT NOT NULL DEFAULT 'out';"
 )
 
+MIGRATIONS.append(  # v7: BPM and key, read from a Rekordbox XML export
+    """
+    ALTER TABLE tracks ADD COLUMN bpm REAL;
+    ALTER TABLE tracks ADD COLUMN musical_key TEXT
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 CHECK_VERSION_SQL = (

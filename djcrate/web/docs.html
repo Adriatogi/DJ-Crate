@@ -1,0 +1,71 @@
+<h1>DJ Crate docs</h1>
+<p class="lead">Everything DJ Crate does, why it's built this way, and how it fits next to Rekordbox. These docs live inside the app, so they work offline.</p>
+
+<h2 id="what">What DJ Crate is</h2>
+<p>Your prep room before Rekordbox. DJ Crate helps you find songs, get the right audio files, catalogue them, and remember what works together. Then you take the music to Rekordbox to analyse, cue and perform.</p>
+
+<h2 id="philosophy">Philosophy</h2>
+<ul class="principles">
+  <li><b>The DJ decides.</b> There is no recommendation algorithm, no "next song" suggestions and no auto-mixing, and there won't be. DJ Crate remembers what <i>you</i> found (your mixes, samples, notes and sets) and makes it easy to find again. It gives facts such as BPM, key and what samples what. It never picks for you.</li>
+  <li><b>Suggestions are never applied on their own.</b> Genius samples and YouTube search results are always ticked or pasted by you.</li>
+  <li><b>One source for your library: Spotify.</b> To add a song, add it to a Spotify playlist and import it. Songs don't live only inside DJ Crate.</li>
+  <li><b>You choose the audio.</b> You paste the link. The length check helps you catch the wrong version, but it never swaps one in silently.</li>
+  <li><b>Local and yours.</b> Everything is in your library folder on your Mac. No account, no cloud. Backups are automatic.</li>
+  <li><b>Rekordbox stays in charge of performance.</b> DJ Crate never touches Rekordbox's database. The two only talk through files Rekordbox officially reads and writes.</li>
+</ul>
+
+<h2 id="layers">DJ Crate and Rekordbox</h2>
+<p>DJ Crate is a layer <i>above</i> Rekordbox. They stay separate on purpose, with one line of communication going each way.</p>
+<div class="diagram">
+  <div class="box top"><b>DJ Crate</b><span>find · download · catalogue · samples · plan sets</span></div>
+  <div class="lines">
+    <div class="line down"><span class="arrow">▼</span><div><b>Crates &amp; sets → playlists, notes → Comments</b><code>DJ Crate for Rekordbox.xml</code></div></div>
+    <div class="line up"><span class="arrow">▲</span><div><b>BPM &amp; key</b><code>rekordbox.xml</code> (your export)</div></div>
+  </div>
+  <div class="box bottom"><b>Rekordbox</b><span>analyse · fix BPM &amp; grids · cues · USB · play</span></div>
+  <div class="foot">Both use the same MP3s in your library folder, which is the single source of truth.</div>
+</div>
+<table class="resp">
+  <tr><th>DJ Crate is responsible for</th><th>Rekordbox is responsible for</th></tr>
+  <tr><td>Spotify crates, finding links, downloading, tags</td><td>Analysis, BPM and beat-grid correcting</td></tr>
+  <tr><td>Cataloguing: crates, flags, notes</td><td>Cue points, hot cues, loops</td></tr>
+  <tr><td>Samples (Genius / WhoSampled)</td><td>My Tags, ratings, colours</td></tr>
+  <tr><td>Cutting: how songs mix into each other</td><td>USB export for CDJs</td></tr>
+  <tr><td>Set Setter: planning sets</td><td>Actually mixing</td></tr>
+</table>
+<p>Rekordbox never pulls changes by itself. DJ Crate writes and updates its file by itself (you never make or edit it); you only import the playlists in Rekordbox. BPM, key, grids and cues are <b>never</b> sent from DJ Crate to Rekordbox, so nothing in Rekordbox can be overwritten with worse data. Songs are matched by file path, so you don't get duplicates. Set it up under <a href="#" data-tab="settings">Settings → Rekordbox</a>.</p>
+
+<h2 id="crates">Crates</h2>
+<ul>
+  <li><b>Spotify import and re-sync.</b> A playlist becomes a crate with every song's title, artists, album, cover and length. Songs removed on Spotify are kept, dimmed, with your notes and file.</li>
+  <li><b>Smart crates</b> fill themselves: Needs Link, Ready to Download, Downloaded, Ready, Broken, Check Version, Missing Files. You can also make your own crates and folders and drag songs into them.</li>
+  <li><b>Links.</b> Paste a YouTube link, or use <b>Find</b>. It highlights the result whose length matches Spotify's and warns about Radio Edit, Live, Sped up and similar. It searches the next few songs ahead so Find opens instantly.</li>
+  <li><b>Downloads.</b> <code>Title - Artist.mp3</code>, constant 192 kbps, tagged with title, artists, album, year, ISRC, cover art, and your notes in the comment.</li>
+  <li><b>Flags.</b> <b>Edited</b> (you changed the audio on purpose), <b>Ready</b> (prepped), <b>Broken</b> (needs fixing; say what in the notes).</li>
+  <li><b>Check Version.</b> A download more than 5 seconds off Spotify's length is probably a different version.</li>
+  <li><b>BPM &amp; Key columns.</b> Sortable, filled from your Rekordbox export. Key shows both notations, like <code>8A · Am</code>.</li>
+  <li><b>The song card</b> (click a cover, title or artist) holds notes, samples, metadata and file info. It is the same card everywhere in the app.</li>
+  <li><b>Player.</b> ▶ previews a song under its row. Space plays and pauses.</li>
+</ul>
+
+<h2 id="cutting">Cutting</h2>
+<p>Every song has a board with the song in the middle. A <b>mix</b> is a note between songs, e.g. <i>Shangri-La → [loop the last 8 bars, reverb, slow it down] → Elevators</i>. Mixes are one-way. <b>Steps 1 · 2 · 3</b> reveals the songs your song connects to, then theirs. <b>Samples</b> can be text or a link to another song in your library. <b>Find samples</b> asks Genius what a song samples or was sampled in, and you tick which to keep.</p>
+
+<h2 id="sets">Set Setter</h2>
+<p>Build a set as a board of songs and free-text cards, wired together through mix notes. Branch as much as you like. The bright wires are your <b>main path</b>, the set as you'd play it. <b>List</b> shows it as a running order with start times and total length, and <b>Plays for</b> sets how long each song actually plays. <b>Export as text</b> copies it out. With Rekordbox sending turned on, each set becomes a playlist in main-path order.</p>
+
+<h2 id="week">A typical week</h2>
+<ol class="steps">
+  <li>Add songs to a Spotify playlist all week.</li>
+  <li>Import or re-sync it in DJ Crate.</li>
+  <li>Paste a link for each song (or use Find), then <b>Download All</b>.</li>
+  <li>Bring the new files into Rekordbox, analyse them and set cues.</li>
+  <li>Re-export your collection from Rekordbox, and BPM and key appear in DJ Crate.</li>
+  <li>Note mixes and samples in Cutting as you practise.</li>
+  <li>Plan the set in Set Setter.</li>
+  <li>Send crates and sets to Rekordbox, import the playlists there and perform.</li>
+</ol>
+
+<h2 id="backups">Backups and a new Mac</h2>
+<p>You need two separate backups: the <b>library folder</b> (every MP3 plus DJ Crate's data in <code>.djcrate/</code>), and <b>Rekordbox's own backup</b> (cues, grids, playlists, My Tags: File → Library → Backup Library). DJ Crate also saves its database every day, keeping the last 14, and <a href="#" data-tab="settings">Settings</a> can export and import your crates.</p>
+<p>To move to a new Mac: put the library folder at the same path, restore the Rekordbox backup, install DJ Crate and point it at the folder. Don't open the same library from two Macs at once.</p>

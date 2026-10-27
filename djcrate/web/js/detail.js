@@ -5,7 +5,7 @@
 import { patch, post } from "./api.js";
 import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
-import { errorToast, fill, fmtDiff, fmtMs, h, toast } from "./ui.js";
+import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast } from "./ui.js";
 import { relocateTrack, updateTrack } from "./tracks.js";
 
 function current() {
@@ -92,6 +92,8 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
     h("div", { class: "kv" },
       h("div", { class: "k" }, "Status"), h("div", { class: "v" }, statusText(t)),
       h("div", { class: "k" }, "Spotify length"), h("div", { class: "v" }, fmtMs(t.duration_ms)),
+      h("div", { class: "k" }, "BPM"), h("div", { class: "v", title: t.bpm ? "" : "Not in your Rekordbox export yet" }, fmtBpm(t.bpm)),
+      h("div", { class: "k" }, "Key"), h("div", { class: "v", title: t.musical_key ? "" : "Not in your Rekordbox export yet" }, fmtKey(t.musical_key)),
       h("div", { class: "k" }, "File length"), h("div", { class: "v" }, t.file_duration_ms ? lengthLine : "–"),
       h("div", { class: "k" }, "File"), h("div", { class: "v" }, t.file_rel_path || "–"),
       t.isrc ? [h("div", { class: "k" }, "ISRC"), h("div", { class: "v" }, t.isrc)] : null,

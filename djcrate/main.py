@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from . import APP_NAME, backup, libraries, library
+from . import APP_NAME, backup, libraries, library, rekordbox
 from .api import app, downloads, hooks, search_ahead
 from .config import get_port, setup_logging
 from .state import state
@@ -67,6 +67,10 @@ def on_library_opened():
         backup.daily_backup(state)
     except Exception:
         log.exception("Daily backup failed")
+    try:
+        rekordbox.check_once(state)
+    except Exception:
+        log.exception("Rekordbox check failed")
     downloads.wake()
 
 
@@ -89,7 +93,7 @@ class JsApi:
 
     def pick_file(self, kind="mp3"):
         import webview
-        types = {"mp3": ("MP3 files (*.mp3)",), "zip": ("DJ Crate export (*.zip)",)}.get(kind, ())
+        types = {"mp3": ("MP3 files (*.mp3)",), "zip": ("DJ Crate export (*.zip)",), "xml": ("Rekordbox XML (*.xml)",)}.get(kind, ())
         return self._dialog(webview.FileDialog.OPEN, types)
 
     def restart(self):
@@ -158,6 +162,7 @@ def main():
     downloads.start()
     search_ahead.start()
     threading.Thread(target=backup_loop, name="backups", daemon=True).start()
+    threading.Thread(target=rekordbox.watch_loop, name="rekordbox", daemon=True).start()
 
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", log_config=None))
     server_thread = threading.Thread(target=server.run, name="server", daemon=True)

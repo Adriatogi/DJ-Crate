@@ -86,6 +86,9 @@ export async function showSettings() {
     h("p", { class: "muted small" }, "Used by Find samples in Cutting: Genius lists what a song samples and what sampled it. WhoSampled has no public API, so its button just opens the website."),
     h("p", { class: "muted small" }, "Your token is stored in the macOS Keychain, not in the library folder."));
 
+  // ---- Rekordbox
+  const rbCard = rekordboxCard(card, store.status?.rekordbox || {});
+
   // ---- Library
   const libName = h("input", { value: s.library_name, style: { width: "260px" } });
   libName.addEventListener("change", async () => {
@@ -168,7 +171,7 @@ export async function showSettings() {
     h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")),
     h("p", { class: "muted small" }, `DJ Crate ${store.status?.version || ""}`));
 
-  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, libraryCard, downloadsCard, backupsCard, troubleCard));
+  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, libraryCard, downloadsCard, backupsCard, troubleCard));
 }
 
 export async function updateYtdlp(btn) {
@@ -219,4 +222,63 @@ async function changePort() {
       },
     }],
   });
+}
+
+// ------------------------------------------------ Rekordbox (BPM & key in, crates & sets out)
+
+function ago(seconds) {
+  if (!seconds) return "never";
+  const d = Math.max(0, Date.now() / 1000 - seconds);
+  if (d < 60) return "just now";
+  if (d < 3600) return `${Math.round(d / 60)} min ago`;
+  if (d < 86400) return `${Math.round(d / 3600)} h ago`;
+  return `${Math.round(d / 86400)} d ago`;
+}
+
+function rekordboxCard(card, rb) {
+  const ex = rb.export || {};
+  const again = () => { emit("poll"); setTimeout(showSettings, 300); };
+  const run = (fn) => async () => { try { await fn(); again(); } catch (e) { errorToast(e); } };
+
+  const choose = async () => {
+    const path = await native.pickFile("xml", "Path to your Rekordbox XML (File → Export Collection in xml format):");
+    if (!path) return;
+    await put("/api/rekordbox/xml", { path });
+  };
+  const inLine = rb.path
+    ? [h("p", {}, rb.error ? `⚠ ${rb.error}` : `● ${rb.matched} of ${rb.total} downloaded songs matched · updated ${ago(rb.at)}`),
+      h("div", { class: "line" }, h("code", {}, rb.path)),
+      h("div", { class: "line" },
+        h("button", { class: "btn", onclick: run(() => post("/api/rekordbox/import")) }, "Import now"),
+        h("button", { class: "btn", onclick: run(choose) }, "Choose a different file…"),
+        h("button", { class: "btn", onclick: run(() => del("/api/rekordbox/xml")) }, "Stop using this file")),
+      h("p", { class: "muted small" }, "Re-export over the same file in Rekordbox and DJ Crate picks up the change within about 10 seconds.")]
+    : [h("div", { class: "line" }, h("button", { class: "btn primary", onclick: run(choose) }, "Choose XML file…"))];
+
+  const toggle = h("input", { type: "checkbox", class: "sel", checked: !!ex.on });
+  toggle.addEventListener("change", run(() => put("/api/rekordbox/export", { on: toggle.checked })));
+  const outStatus = !ex.on ? null : ex.error ? `⚠ ${ex.error}`
+    : `Updated ${ago(ex.at)} · ${ex.playlists} playlists · ${ex.songs} songs${ex.skipped ? ` · ${ex.skipped} not downloaded yet (left out)` : ""}`;
+
+  return card("Rekordbox",
+    h("p", {}, "DJ Crate and Rekordbox talk through files Rekordbox officially reads and writes. DJ Crate never touches Rekordbox's database."),
+    h("h4", {}, "BPM & key from Rekordbox"),
+    h("ol", {},
+      h("li", {}, "In Rekordbox: File → ", h("b", {}, "Export Collection in xml format"), ", e.g. into your library folder."),
+      h("li", {}, "Choose that file here. Re-export whenever you analyse or fix songs.")),
+    ...inLine,
+    h("h4", {}, "Send crates & sets to Rekordbox"),
+    h("label", { class: "row gap", style: { cursor: "pointer" } }, toggle, "Send my crates & sets to Rekordbox"),
+    h("p", { class: "muted small" }, "When this is on, DJ Crate creates ", h("code", {}, "DJ Crate for Rekordbox.xml"),
+      " in your library folder and keeps it up to date by itself, every time you change a crate or set. You don't make, export or edit that file. The steps below happen in Rekordbox."),
+    outStatus ? h("p", {}, outStatus) : null,
+    ex.on ? h("div", { class: "line" },
+      h("button", { class: "btn", onclick: () => post("/api/rekordbox/export/reveal").catch(errorToast) }, "Show in Finder"),
+      h("button", { class: "btn", onclick: async () => { await copyText(ex.path); toast("Path copied."); } }, "Copy path")) : null,
+    h("p", {}, "One-time setup in Rekordbox:"),
+    h("ol", {},
+      h("li", {}, "Rekordbox → Preferences → Advanced → Database → rekordbox xml → Imported Library: choose that file."),
+      h("li", {}, "Preferences → View → Layout: tick “rekordbox xml” so it shows in the sidebar."),
+      h("li", {}, "In that section, right-click a playlist → Import Playlist. Do it again after changing a crate.")),
+    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order, and notes become each song's Comments. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
 }

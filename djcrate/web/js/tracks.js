@@ -5,9 +5,10 @@ import { get, native, patch, post } from "./api.js";
 import { drag } from "./sidebar.js";
 import { LINK_RE, emit, flatCrates, findCrate, on, store } from "./store.js";
 import {
-  closePopover, confirmDialog, errorToast, fill, fmtDiff, fmtMs, h, isPopoverOpenFor, menu, popover, toast,
+  closePopover, confirmDialog, errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, isPopoverOpenFor, menu, popover, toast,
 } from "./ui.js";
 
+const NO_ANALYSIS = "Not in your Rekordbox export yet";
 const rows = new Map(); // track id -> { tr, sig }
 export const selected = new Set();
 let player = null;      // { trackId, row, playBtn }
@@ -133,6 +134,8 @@ function rowFor(t) {
     opens(h("td", { class: "artist", title: `${t.artists}\nClick to open song details` }, t.artists)),
     h("td", { class: "c-album muted", title: t.album }, t.album),
     h("td", { class: "c-time muted" }, fmtMs(t.duration_ms ?? t.file_duration_ms)),
+    h("td", { class: "c-bpm muted", title: t.bpm ? "" : NO_ANALYSIS }, fmtBpm(t.bpm)),
+    h("td", { class: "c-key muted", title: t.musical_key ? "" : NO_ANALYSIS }, fmtKey(t.musical_key)),
     h("td", { class: "c-link" }, linkCell(t)),
     h("td", { class: "c-play" }, playButton(t, tr)),
     h("td", { class: "c-flag" }, flag(t, "edited")),

@@ -10,7 +10,12 @@ Tools like spotdl download your Spotify playlists by guessing the YouTube video.
 4. Track your prep with three checkboxes: **Edited** (you cut the audio on purpose), **Ready** (prepped and gig-ready), **Broken** (needs fixing; say what in the notes). Each song also has its own notes.
 5. Plan sets in **Set Setter**: an ordered running list with cue times, transition notes and running time, exportable as text.
 
-Everything stays on your Mac. DJ Crate runs as a normal app window; no browser tab or terminal is needed.
+6. **BPM & key from Rekordbox.** Export your collection as XML from Rekordbox and DJ Crate shows sortable BPM and Key columns (`8A · Am`), refreshing whenever you re-export.
+7. **Send crates & sets to Rekordbox.** Crates, folders and sets become playlists (notes become Comments) in a separate `DJ Crate for Rekordbox.xml` that DJ Crate writes and keeps up to date by itself; you never make or edit it. Rekordbox matches songs by file path, so there are no duplicates.
+
+Everything stays on your Mac. DJ Crate runs as a normal app window; no browser tab or terminal is needed. Open the **Docs** tab inside the app for everything it does and why.
+
+**Philosophy:** the DJ decides. There is no recommendation algorithm and no auto-mixing. DJ Crate remembers what you found and shows facts, but you pick what plays next.
 
 ---
 
@@ -126,6 +131,10 @@ DJ Crate and Rekordbox stay **separate on purpose**, with one shared music folde
 4. In Rekordbox: analyze, fix grids, set cues, and build playlists. Once a song is prepped and you know it, tick **Ready** in DJ Crate. If something's off (bad rip, wrong version, clipping), tick **Broken** and put what's wrong in its notes.
 6. If you edit a song's title, artists or notes in DJ Crate *after* importing, right-click it in Rekordbox and choose **Reload Tag**.
 
+**BPM and key** come from Rekordbox's own analysis (so your fixes count), through its XML export. In Rekordbox: File → **Export Collection in xml format**. In DJ Crate: **Settings → Rekordbox → Choose XML file…**. Re-export over the same file and DJ Crate updates within ~10 seconds.
+
+**Crates and sets go the other way** via **Settings → Rekordbox → Send crates & sets**, which keeps `DJ Crate for Rekordbox.xml` up to date in the library folder. In Rekordbox, point *Preferences → Advanced → Database → rekordbox xml* at it, then import playlists from the "rekordbox xml" sidebar section. Only identity and notes are sent; never BPM, key, grids or cues. (Menu names are to be confirmed against a real Rekordbox.)
+
 **Don't rename or move MP3s in Finder.** DJ Crate never renames a file after downloading it, so Rekordbox keeps its link. Edit names in DJ Crate; that changes the tags, not the filename. If a file does go missing, DJ Crate marks it with a red **!**, the same as Rekordbox. Use **Relocate…** for one file, or **⋯ → Auto Relocate** to search a folder.
 
 ---
@@ -183,6 +192,6 @@ python3 scripts/make_icon.py             # regenerate the app icon
 
 - **Backend:** Python 3.12–3.13, FastAPI + uvicorn on `127.0.0.1:8765`, shown in a pywebview window. Data is in SQLite at `<library>/.djcrate/djcrate.db`. yt-dlp runs as a subprocess, ffmpeg converts, and mutagen writes the tags.
 - **Frontend:** plain HTML/CSS/JS modules in `djcrate/web/`, with no build step.
-- **Layout:** `djcrate/api.py` (routes), `db.py` (schema and migrations), `downloader.py` (queue and error handling), `spotify.py`, `yt_search.py`, `library.py` (files, relocate, import), `backup.py`, `state.py` (open library, lock, health), `main.py` (window).
+- **Layout:** `djcrate/api.py` (routes), `db.py` (schema and migrations), `downloader.py` (queue and error handling), `spotify.py`, `yt_search.py`, `library.py` (files, relocate, import), `rekordbox.py` (XML in/out), `backup.py`, `state.py` (open library, lock, health), `main.py` (window).
 
 Downloading from YouTube may break YouTube's terms of service. DJ Crate only downloads links you choose; use it for music you have the right to use.
