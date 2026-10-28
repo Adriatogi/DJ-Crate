@@ -31,7 +31,7 @@ hooks: dict[str, Any] = {"focus": None}
 
 # Routes that must keep working in read-only mode / without a library.
 READ_ONLY_ALLOWED = (
-    "/api/library/", "/api/reveal", "/api/rekordbox/export/reveal", "/api/open_url", "/api/focus", "/api/tools/", "/api/spotify/login",
+    "/api/library/", "/api/reveal", "/api/pick", "/api/rekordbox/export/reveal", "/api/open_url", "/api/focus", "/api/tools/", "/api/spotify/login",
     "/api/spotify/cancel_login", "/api/spotify/logout", "/api/backup/export", "/api/errors/clear",
 )
 
@@ -1376,6 +1376,17 @@ def backup_now():
 class RevealBody(BaseModel):
     track_id: int | None = None
     target: str | None = None  # "library" | "logs"
+
+
+class PickBody(BaseModel):
+    kind: str = "file"  # "file" | "folder"
+    extensions: list[str] = []
+
+
+@app.post("/api/pick")
+def pick(body: PickBody):
+    """Finder picker for browser mode (the app window uses pywebview's own)."""
+    return {"path": tools.pick_path(body.kind, tuple(e for e in body.extensions if e.isalnum()))}
 
 
 @app.post("/api/reveal")

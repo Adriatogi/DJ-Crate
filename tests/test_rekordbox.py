@@ -220,3 +220,11 @@ def test_export_toggle_api_and_watcher(client, lib):
     p.unlink()
     rekordbox.check_once(lib)
     assert not p.exists()
+
+
+def test_pick_endpoint_uses_finder_picker(client, monkeypatch):
+    from djcrate import tools
+    seen = {}
+    monkeypatch.setattr(tools, "pick_path", lambda kind, ext: seen.update(kind=kind, ext=ext) or "/x/rb.xml")
+    assert client.post("/api/pick", json={"kind": "file", "extensions": ["xml", "a;b"]}).json() == {"path": "/x/rb.xml"}
+    assert seen == {"kind": "file", "ext": ("xml",)}
