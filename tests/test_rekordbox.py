@@ -158,7 +158,7 @@ def test_export_structure(client, lib):
     pending = add_song(lib, "Pending", status="none")
     removed = add_song(lib, "Removed")
     conn = lib.conn()
-    conn.execute("UPDATE tracks SET bpm = 120, musical_key = '8A' WHERE id = ?", (a,))
+    conn.execute("UPDATE tracks SET bpm = 120, musical_key = '8A', ready = 1 WHERE id = ?", (a,))
     folder = client.post("/api/crates", json={"name": "House", "kind": "folder"}).json()["id"]
     warm = client.post("/api/crates", json={"name": "Warmup", "parent_id": folder}).json()["id"]
     peak = client.post("/api/crates", json={"name": "Peak"}).json()["id"]
@@ -177,6 +177,7 @@ def test_export_structure(client, lib):
     tracks = {t.get("Name"): t for t in root.find("COLLECTION")}
     assert set(tracks) == {"Alpha", "Bravo & Co #1", "Charlie", "Removed"}
     assert tracks["Alpha"].get("Comments") == "loop me" and tracks["Alpha"].get("Kind") == "MP3 File"
+    assert tracks["Alpha"].get("Colour") == "0x00FF00" and tracks["Charlie"].get("Colour") is None  # Ready = green
     for t in tracks.values():  # never BPM, key, grids or cues
         assert not ({"AverageBpm", "Tonality"} & set(t.attrib))
     assert root.find(".//TEMPO") is None and root.find(".//POSITION_MARK") is None
