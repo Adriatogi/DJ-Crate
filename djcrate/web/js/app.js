@@ -22,6 +22,7 @@ let everConnected = false;
 let openedPath = null;
 let searchPaused = false;
 let lastRekordboxAt;
+let pendingTrackRefresh = false;
 
 // ------------------------------------------------ tabs
 
@@ -34,6 +35,7 @@ function showTab(name) {
   if (name === "docs") showDocs();
   if (name === "settings") showSettings();
   if (name !== "crates") closePlayer();
+  if (name === "crates" && pendingTrackRefresh) { pendingTrackRefresh = false; refreshTracks(); }
 }
 
 // ------------------------------------------------ status polling
@@ -89,7 +91,7 @@ async function poll() {
     // Rekordbox re-export picked up by the watcher: refresh BPM & key.
     const rb = s.rekordbox;
     if (rb && lastRekordboxAt !== undefined && rb.at && rb.at !== lastRekordboxAt) {
-      if (tab === "crates") refreshTracks();
+      if (tab === "crates") refreshTracks(); else pendingTrackRefresh = true;
       if (tab === "settings") showSettings();
       toast(rb.error || `Updated BPM & key for ${rb.matched} songs from Rekordbox`, { type: rb.error ? "warn" : "success" });
     }

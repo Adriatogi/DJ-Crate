@@ -225,3 +225,6 @@ testing_sound/
 # Built app and the default library (your music) live in the repo folder but are never committed
 /DJ Crate.app/
 /Libraries/
+CLAUDE.md
+rekordbox.xml
+rekorbox_to_dj_crate.xml
