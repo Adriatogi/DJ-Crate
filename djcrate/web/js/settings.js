@@ -280,5 +280,5 @@ function rekordboxCard(card, rb) {
       h("li", {}, "Rekordbox → Preferences → Advanced → Database → rekordbox xml → Imported Library: choose that file."),
       h("li", {}, "Preferences → View → Layout: tick “rekordbox xml” so it shows in the sidebar."),
       h("li", {}, "In that section, right-click a playlist → Import Playlist. Do it again after changing a crate.")),
-    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order, notes become each song's Comments, and songs you ticked Ready get a green colour. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
+    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order, and notes become each song's Comments. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
 }

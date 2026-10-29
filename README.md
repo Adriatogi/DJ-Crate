@@ -133,7 +133,7 @@ DJ Crate and Rekordbox stay **separate on purpose**, with one shared music folde
 
 **BPM and key** come from Rekordbox's own analysis (so your fixes count), through its XML export. In Rekordbox: File → **Export Collection in xml format**. In DJ Crate: **Settings → Rekordbox → Choose XML file…**. Re-export over the same file and DJ Crate updates within ~10 seconds.
 
-**Crates and sets go the other way** via **Settings → Rekordbox → Send crates & sets**, which keeps `DJ Crate for Rekordbox.xml` up to date in the library folder. In Rekordbox, point *Preferences → Advanced → Database → rekordbox xml* at it, then import playlists from the "rekordbox xml" sidebar section. Only identity, notes and a green colour for Ready songs are sent; never BPM, key, grids or cues. (Menu names are to be confirmed against a real Rekordbox.)
+**Crates and sets go the other way** via **Settings → Rekordbox → Send crates & sets**, which keeps `DJ Crate for Rekordbox.xml` up to date in the library folder. In Rekordbox, point *Preferences → Advanced → Database → rekordbox xml* at it, then import playlists from the "rekordbox xml" sidebar section. Only identity and notes are sent; never BPM, key, grids or cues. (Menu names are to be confirmed against a real Rekordbox.)
 
 **Don't rename or move MP3s in Finder.** DJ Crate never renames a file after downloading it, so Rekordbox keeps its link. Edit names in DJ Crate; that changes the tags, not the filename. If a file does go missing, DJ Crate marks it with a red **!**, the same as Rekordbox. Use **Relocate…** for one file, or **⋯ → Auto Relocate** to search a folder.
 

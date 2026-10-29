@@ -24,7 +24,6 @@ log = logging.getLogger("djcrate.rekordbox")
 
 EXPORT_NAME = "DJ Crate for Rekordbox.xml"
 WATCH_SECONDS = 10
-GREEN = "0x00FF00"  # Rekordbox XML colour for "Ready" songs
 
 CAMELOT = {
     "1A": "Abm", "2A": "Ebm", "3A": "Bbm", "4A": "Fm", "5A": "Cm", "6A": "Gm",
@@ -216,8 +215,6 @@ def build_export(st, conn) -> tuple[bytes, dict]:
         ids[t["id"]] = t["id"]
         a = {"TrackID": str(t["id"]), "Name": t["title"], "Artist": t["artists"], "Album": t["album"],
              "Comments": t["notes"] or "", "Kind": "MP3 File", "Location": path_to_location(p)}
-        if t["ready"]:
-            a["Colour"] = GREEN  # Ready songs show green in Rekordbox
         year = (t["release_date"] or "")[:4]
         if year.isdigit():
             a["Year"] = year
