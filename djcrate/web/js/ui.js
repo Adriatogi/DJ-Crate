@@ -165,22 +165,33 @@ export function promptDialog(title, { label = "", value = "", ok = "Save", place
 let openPop = null;
 
 export function closePopover() {
-  if (openPop) { openPop.el.remove(); openPop.onClose && openPop.onClose(); openPop = null; }
+  if (openPop) { openPop.ro.disconnect(); openPop.el.remove(); openPop.onClose && openPop.onClose(); openPop = null; }
 }
 
 export function popover(anchor, content, { cls = "", align = "left", onClose = null } = {}) {
   closePopover();
   const el = h("div", { class: `popover ${cls}` }, content);
   document.body.append(el);
-  const r = anchor.getBoundingClientRect();
-  const w = el.offsetWidth, ht = el.offsetHeight;
-  let left = align === "right" ? r.right - w : r.left;
-  left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-  let top = r.bottom + 4;
-  if (top + ht > window.innerHeight - 8) top = Math.max(8, r.top - ht - 4);
-  el.style.left = `${left}px`;
-  el.style.top = `${top}px`;
-  openPop = { el, anchor, onClose };
+  // Content can grow after opening (e.g. Find's results arrive), so re-place it
+  // on every resize: below the anchor if it fits, else above, else whichever
+  // side has more room, capped to that room so it scrolls instead of spilling off-screen.
+  const place = () => {
+    const r = anchor.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12, above = r.top - 12;
+    el.style.maxHeight = "";
+    const w = el.offsetWidth, natural = el.scrollHeight;
+    const up = natural > below && above > below;
+    const ht = Math.min(natural, up ? above : below, window.innerHeight * 0.7);
+    el.style.maxHeight = `${ht}px`;
+    let left = align === "right" ? r.right - w : r.left;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    el.style.left = `${left}px`;
+    el.style.top = `${up ? r.top - ht - 4 : r.bottom + 4}px`;
+  };
+  place();
+  const ro = new ResizeObserver(place);
+  ro.observe(content);
+  openPop = { el, anchor, onClose, ro };
   return el;
 }
 
