@@ -169,8 +169,8 @@ body.dragging-crate .root-drop { display: block; }
 /* ------------------------------------------------ table */
 .table-wrap { flex: 1; overflow: auto; position: relative; }
 table#tracks { width: 100%; border-collapse: collapse; table-layout: fixed; } /* columns that can't shrink further make it scroll sideways */
-#tracks th[data-sort="title"] { width: clamp(130px, 15vw, 280px); }
-#tracks th[data-sort="artists"] { width: clamp(100px, 11vw, 220px); }
+#tracks th[data-sort="title"] { width: clamp(120px, 12vw, 240px); }
+#tracks th[data-sort="artists"] { width: clamp(90px, 9vw, 190px); }
 #tracks td.artist, #tracks .t-title { font-size: clamp(11px, 0.85vw + 2px, 13px); }
 #tracks th {
   position: sticky; top: 0; background: var(--bg); z-index: 2; text-align: left; font-size: 11px; color: var(--muted);
@@ -185,11 +185,11 @@ table#tracks { width: 100%; border-collapse: collapse; table-layout: fixed; } /*
 #tracks tr.track.removed td.c-sel, #tracks tr.track.removed td.c-action { opacity: 1; }
 .c-sel { width: 34px; text-align: center; }
 .c-cover { width: 44px; }
-.c-album { width: clamp(60px, 7vw, 160px); }
+.c-album { width: clamp(60px, 6vw, 140px); }
 .c-time { width: 52px; }
 .c-bpm { width: 52px; }
 .c-key { width: 82px; white-space: nowrap; }
-.c-link { width: 150px; }
+.c-link { width: clamp(170px, 14vw, 320px); }
 .c-play { width: 34px; }
 .c-status { width: 120px; }
 .c-action { width: 116px; text-align: right; overflow: visible !important; }
