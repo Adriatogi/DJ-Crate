@@ -11,7 +11,7 @@ import { debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
 let loadSeq = 0;
 
 const SORTS = {
-  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key",
+  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key", genre: "Genre",
   added: "Date added", status: "Status", edited: "Edited", ready: "Ready", broken: "Broken",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
@@ -22,6 +22,7 @@ function sortValue(t, key) {
     case "duration": return t.duration_ms ?? t.file_duration_ms ?? 0;
     case "bpm": return t.bpm ?? 0;
     case "musical_key": return keyOrder(t.musical_key);
+    case "genre": return t.genre_tag ? t.genre_tag.toLowerCase() : "\uffff"; // songs without a genre last
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
     case "edited": case "ready": case "broken": return t[key] ? 1 : 0;
@@ -88,7 +89,8 @@ export async function refreshTracks() {
   const seq = ++loadSeq;
   const q = document.getElementById("search").value;
   try {
-    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}`);
+    const rack = store.view.startsWith("genre:") ? `&sub=${store.rack.sub ? 1 : 0}&artist=${encodeURIComponent(store.rack.artist)}` : "";
+    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${rack}`);
     if (seq !== loadSeq) return; // a newer request won
     r.tracks.forEach((t, i) => { t._order = i; });
     store.tracks = r.tracks;
@@ -105,7 +107,7 @@ export async function refreshTracks() {
 export function selectView(view) {
   if (view !== store.view) {
     store.view = view;
-    localStorage.setItem("djc.view", view);
+    if (!view.startsWith("genre:")) localStorage.setItem("djc.view", view); // Genre Rack views aren't remembered here
     resetTable();
     closeDetail();
     store.tracks = [];
@@ -121,6 +123,7 @@ function viewInfo() {
     const c = findCrate(Number(v.split(":")[1]));
     return { name: c?.name || "…", crate: c };
   }
+  if (v.startsWith("genre:")) return { name: store.rack.name || "Genre", crate: null };
   const key = v.split(":")[1];
   const s = store.sidebar?.smart.find((x) => x.key === key);
   return { name: s?.name || "All Tracks", crate: null };
@@ -184,6 +187,7 @@ export function initCrates() {
   initDetail();
   initImporters();
   document.getElementById("btn-import-spotify").onclick = () => emit("import-spotify");
+  document.getElementById("btn-resync-all").onclick = () => emit("resync-all");
   document.getElementById("btn-add-manual").onclick = () => emit("add-manual");
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;

@@ -71,12 +71,17 @@ def test_metadata_edit_rewrites_tags_not_filename(client, lib, make_mp3):
     mp3 = make_mp3(lib.library / "Old - Me.mp3")
     conn = lib.conn()
     conn.execute("UPDATE tracks SET file_rel_path = ?, download_status = 'done' WHERE id = ?", (lib.rel_path(mp3), t["id"]))
-    client.patch(f"/api/tracks/{t['id']}", json={"title": "New", "notes": "big drop"})
+    from mutagen.id3 import COMM, ID3
+    id3 = ID3(mp3)
+    id3.add(COMM(encoding=3, lang="eng", desc="", text="from Rekordbox"))  # the DJ's own comment
+    id3.save(mp3, v2_version=3)
+    client.patch(f"/api/tracks/{t['id']}", json={"title": "New"})
     assert mp3.exists()  # filename unchanged so Rekordbox keeps its link
-    meta = tags.read_tags(mp3)
-    assert meta["title"] == "New"
-    from mutagen.id3 import ID3
-    assert str(ID3(mp3).getall("COMM")[0].text[0]) == "big drop"
+    assert tags.read_tags(mp3)["title"] == "New"
+    assert str(ID3(mp3).getall("COMM")[0].text[0]) == "from Rekordbox"  # comment is never touched
+    client.patch(f"/api/tracks/{t['id']}", json={"notes": "big drop"})  # notes stay in DJ Crate only
+    assert str(ID3(mp3).getall("COMM")[0].text[0]) == "from Rekordbox"
+    assert client.get("/api/tracks?view=smart:all").json()["tracks"][0]["notes"] == "big drop"
 
 
 def test_missing_files_and_relocate(client, lib, make_mp3):

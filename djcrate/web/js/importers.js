@@ -82,10 +82,13 @@ async function renderPicker(body) {
   const url = h("input", { placeholder: "…or paste a playlist link (Share → Copy link to playlist)", style: { width: "100%" } });
   const folder = folderSelect(currentFolderId());
   const progress = h("div", { class: "muted small", style: { minHeight: "18px" } });
+  const imported = new Set(flatCrates().map((c) => c.spotify_playlist_id).filter(Boolean));
+  const hideBox = h("input", { type: "checkbox", checked: localStorage.getItem("djc.hideImported") !== "0" });
+  const allHidden = h("p", { class: "muted", hidden: true }, "All your playlists are already imported.");
   const items = [{ id: "liked", name: "Liked Songs", count: null, readable: true, owner: data.me?.name }, ...data.playlists];
   const list = h("div", { class: "list" }, items.map((p) => {
     const el = h("div", {
-      class: `item${p.readable ? "" : " disabled"}`,
+      class: `item${p.readable ? "" : " disabled"}${imported.has(p.id) ? " imported" : ""}`,
       title: p.readable ? "" : "Spotify only shares the songs of playlists you own or collaborate on. Copy its songs into your own playlist to import them.",
       onclick: () => {
         if (!p.readable) return;
@@ -98,15 +101,28 @@ async function renderPicker(body) {
       p.image ? h("img", { src: p.image, alt: "" }) : h("div", { class: "cover placeholder" }, p.id === "liked" ? "♥" : "♪"),
       h("div", { class: "grow" },
         h("div", { class: "t-title" }, p.name),
-        h("div", { class: "t-sub" }, [p.count != null ? `${p.count} songs` : null, p.owner ? `by ${p.owner}` : null, p.readable ? null : "not yours — can't import"].filter(Boolean).join(" · "))));
+        h("div", { class: "t-sub" }, [p.count != null ? `${p.count} songs` : null, p.owner ? `by ${p.owner}` : null, imported.has(p.id) ? "already imported" : null, p.readable ? null : "not yours — can't import"].filter(Boolean).join(" · "))));
     return el;
   }));
+  const applyHide = () => {
+    const hide = hideBox.checked;
+    localStorage.setItem("djc.hideImported", hide ? "1" : "0");
+    list.querySelectorAll(".item").forEach((el, i) => {
+      const gone = hide && imported.has(items[i].id);
+      el.hidden = gone;
+      if (gone && el.classList.contains("selected")) { el.classList.remove("selected"); chosen = null; }
+    });
+    allHidden.hidden = !(hide && items.every((p) => imported.has(p.id)));
+  };
+  hideBox.addEventListener("change", applyHide);
   url.addEventListener("input", () => { if (url.value) { chosen = null; list.querySelectorAll(".item").forEach((i) => i.classList.remove("selected")); } });
   body.replaceChildren(
     h("p", { class: "muted" }, `Logged in as ${data.me?.name || "you"}. Pick a playlist:`),
-    list, url,
+    h("label", { class: "row gap small", style: { margin: "4px 0" } }, hideBox, "Hide already imported playlists"),
+    list, allHidden, url,
     h("div", { class: "field", style: { marginTop: "10px" } }, h("label", {}, "Put the new crate in"), folder),
     progress);
+  applyHide();
   spotifyModal.setButtons([
     { label: "Cancel" },
     {
@@ -162,6 +178,56 @@ export async function resyncCrate(crateId) {
     close();
     errorToast(e);
     if (["revoked", "not_logged_in"].includes(e.code)) emit("poll");
+  }
+}
+
+let resyncing = false;
+
+export async function resyncAll() {
+  if (resyncing) return;
+  const sp = store.status?.spotify || {};
+  if (!sp.client_id_set || !sp.connected) return openSpotifyImport();
+  const crates = flatCrates().filter((c) => c.spotify_playlist_id);
+  if (!crates.length) {
+    toast("No Spotify crates yet — import a playlist first.", { type: "info" });
+    return;
+  }
+  resyncing = true;
+  const btn = document.getElementById("btn-resync-all");
+  btn.disabled = true;
+  let close = () => {};
+  const total = { added: 0, removed: 0, restored: 0, done: 0 };
+  const failed = [];
+  try {
+    for (const [i, c] of crates.entries()) {
+      close();
+      close = toast(`Re-syncing ${i + 1} of ${crates.length}: “${c.name}”…`, { timeout: 0 });
+      try {
+        const r = await post(`/api/crates/${c.id}/resync`);
+        total.added += r.added; total.removed += r.removed; total.restored += r.restored; total.done++;
+      } catch (e) {
+        if (["revoked", "not_logged_in"].includes(e.code)) {
+          close();
+          errorToast(e);
+          emit("poll");
+          return;
+        }
+        failed.push(c.name);
+      }
+    }
+    close();
+    const parts = [`${total.added} new`];
+    if (total.removed) parts.push(`${total.removed} removed on Spotify`);
+    if (total.restored) parts.push(`${total.restored} back on Spotify`);
+    let msg = `Re-synced ${total.done} crate${total.done === 1 ? "" : "s"}: ${parts.join(", ")}.`;
+    if (failed.length) msg += ` ${failed.length} couldn't re-sync: ${failed.map((n) => `“${n}”`).join(", ")}.`;
+    toast(msg, { type: failed.length ? "warn" : "success", timeout: 8000 });
+  } finally {
+    close();
+    resyncing = false;
+    btn.disabled = false;
+    emit("refresh-sidebar");
+    emit("refresh-tracks");
   }
 }
 
@@ -280,6 +346,7 @@ export function initImporters() {
   on("add-manual", openManualAdd);
   on("import-folder", importFolder);
   on("resync", resyncCrate);
+  on("resync-all", resyncAll);
   on("status", (s) => {
     // Live-update the login step of the Spotify dialog.
     if (!spotifyModal) return;

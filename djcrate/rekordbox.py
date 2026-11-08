@@ -3,7 +3,7 @@
 Two files, one per direction:
   * `rekordbox.xml`, exported by Rekordbox: DJ Crate reads BPM and key from it.
   * `DJ Crate for Rekordbox.xml`, written by DJ Crate: crates and sets as
-    playlists, plus notes as each song's Comments. Rekordbox matches songs by
+    playlists. Rekordbox matches songs by
     file path, so nothing is duplicated. BPM, key, grids and cues are never sent.
 """
 
@@ -83,7 +83,7 @@ def _norm(path) -> str:
 # ---------------------------------------------------------------- Rekordbox -> DJ Crate
 
 def parse(path):
-    """Yield (absolute path, bpm or None, camelot or None) for each collection track."""
+    """Yield (absolute path, bpm or None, camelot or None, genre) for each collection track."""
     for _, el in ET.iterparse(str(path), events=("end",)):
         if el.tag != "TRACK":
             continue
@@ -94,7 +94,7 @@ def parse(path):
                     bpm = float(el.get("AverageBpm") or 0) or None
                 except ValueError:
                     bpm = None
-                yield p, bpm, to_camelot(el.get("Tonality"))
+                yield p, bpm, to_camelot(el.get("Tonality")), (el.get("Genre") or "").strip()
         el.clear()
 
 
@@ -105,10 +105,10 @@ def _read_xml(path) -> list[tuple]:
 def import_xml(conn, xml_path) -> dict:
     """Copy BPM and key onto the matching library tracks. Songs not in the XML keep theirs."""
     entries = _read_xml(xml_path)
-    by_path = {_norm(p): (bpm, key) for p, bpm, key in entries}
-    tails = [(_norm(p), (bpm, key)) for p, bpm, key in entries]
+    by_path = {_norm(p): (bpm, key, genre) for p, bpm, key, genre in entries}
+    tails = [(_norm(p), (bpm, key, genre)) for p, bpm, key, genre in entries]
     rows = conn.execute("SELECT id, file_rel_path FROM tracks WHERE file_rel_path IS NOT NULL AND file_rel_path <> ''").fetchall()
-    matched = 0
+    matched = genres_seen = 0
     with db.tx(conn):
         for r in rows:
             found = by_path.get(_norm(state.abs_path(r["file_rel_path"])))
@@ -117,11 +117,13 @@ def import_xml(conn, xml_path) -> dict:
                 found = next((v for p, v in tails if p.endswith(tail)), None)
             if found is None:
                 continue
-            bpm, key = found
-            conn.execute("UPDATE tracks SET bpm = coalesce(?, bpm), musical_key = coalesce(?, musical_key) WHERE id = ?",
-                         (bpm, key, r["id"]))
+            bpm, key, genre = found
+            # Rekordbox's genre is kept as Rekordbox's own record; DJ Crate's genres are never changed by it.
+            conn.execute("UPDATE tracks SET bpm = coalesce(?, bpm), musical_key = coalesce(?, musical_key), rekordbox_genre = ? WHERE id = ?",
+                         (bpm, key, genre, r["id"]))
             matched += 1
-    return {"matched": matched, "total": len(rows), "in_xml": len(entries)}
+            genres_seen += bool(genre)
+    return {"matched": matched, "total": len(rows), "in_xml": len(entries), "genres": genres_seen}
 
 
 def run_import(conn) -> dict:
@@ -214,7 +216,7 @@ def build_export(st, conn) -> tuple[bytes, dict]:
             continue
         ids[t["id"]] = t["id"]
         a = {"TrackID": str(t["id"]), "Name": t["title"], "Artist": t["artists"], "Album": t["album"],
-             "Comments": t["notes"] or "", "Kind": "MP3 File", "Location": path_to_location(p)}
+             "Kind": "MP3 File", "Location": path_to_location(p)}
         year = (t["release_date"] or "")[:4]
         if year.isdigit():
             a["Year"] = year

@@ -18,7 +18,7 @@ import httpx
 import uvicorn
 
 from . import APP_NAME, backup, libraries, library, rekordbox
-from .api import app, downloads, hooks, search_ahead
+from .api import app, downloads, genre_finder, hooks, search_ahead
 from .config import get_port, setup_logging
 from .state import state
 
@@ -161,6 +161,7 @@ def main():
         state.status = "choose_library"
     downloads.start()
     search_ahead.start()
+    genre_finder.start()
     threading.Thread(target=backup_loop, name="backups", daemon=True).start()
     threading.Thread(target=rekordbox.watch_loop, name="rekordbox", daemon=True).start()
 

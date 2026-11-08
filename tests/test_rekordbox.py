@@ -73,7 +73,7 @@ def test_import_matches_paths_and_leaves_others(lib, tmp_path):
     write_xml(xml, [(lib.library / "Space Song.mp3", "93.50", "Am"), (lib.library / nfd, "128.00", "8B"),
                     (lib.library / "Zero.mp3", "0.00", "Fm"), ("/elsewhere/not-mine.mp3", "120", "Cm")])
     s = rekordbox.import_xml(conn, xml)
-    assert s == {"matched": 3, "total": 4, "in_xml": 4}
+    assert s == {"matched": 3, "total": 4, "in_xml": 4, "genres": 0}
     assert tuple(row(lib, a)) == (93.5, "8A") and tuple(row(lib, b)) == (128.0, "8B")
     assert tuple(row(lib, c)) == (99, "1A")  # not in the XML
     assert tuple(row(lib, d)) == (None, "4A")  # BPM 0.00 means unknown
@@ -129,15 +129,18 @@ def test_api_xml_flow(client, lib, tmp_path):
     assert client.post("/api/rekordbox/import").status_code == 400
 
 
-def test_migration_v6_to_v7_keeps_tracks(tmp_path):
+def test_migration_from_v6_keeps_tracks(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "x.db")
-    db.migrate(conn)
-    conn.execute("ALTER TABLE tracks DROP COLUMN bpm")
-    conn.execute("ALTER TABLE tracks DROP COLUMN musical_key")
-    conn.execute("UPDATE schema_version SET version = 6")
+    with monkeypatch.context() as m:  # a library as an older app left it
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:6])
+        m.setattr(db, "SCHEMA_VERSION", 6)
+        db.migrate(conn)
     conn.execute("INSERT INTO tracks (title) VALUES ('keep me')")
     db.migrate(conn)
-    assert tuple(conn.execute("SELECT title, bpm, musical_key FROM tracks").fetchone()) == ("keep me", None, None)
+    assert db.current_version(conn) == db.SCHEMA_VERSION
+    row = conn.execute("SELECT title, bpm, musical_key, rekordbox_genre, file_genre FROM tracks").fetchone()
+    assert tuple(row) == ("keep me", None, None, None, None)
+    assert conn.execute("SELECT count(*) FROM genres").fetchone()[0] == 0
 
 
 # ------------------------------------------------------------ export
@@ -176,7 +179,7 @@ def test_export_structure(client, lib):
     assert summary == {"playlists": 3, "songs": 4, "skipped": 1}  # Pending has no file yet
     tracks = {t.get("Name"): t for t in root.find("COLLECTION")}
     assert set(tracks) == {"Alpha", "Bravo & Co #1", "Charlie", "Removed"}
-    assert tracks["Alpha"].get("Comments") == "loop me" and tracks["Alpha"].get("Kind") == "MP3 File"
+    assert tracks["Alpha"].get("Kind") == "MP3 File" and "Comments" not in tracks["Alpha"].attrib
     for t in tracks.values():  # never BPM, key, grids or cues
         assert not ({"AverageBpm", "Tonality"} & set(t.attrib))
     assert root.find(".//TEMPO") is None and root.find(".//POSITION_MARK") is None

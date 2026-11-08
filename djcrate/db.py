@@ -247,6 +247,45 @@ MIGRATIONS.append(  # v7: BPM and key, read from a Rekordbox XML export
     """
 )
 
+MIGRATIONS.append(  # v8: Genre Rack (your own genre vocabulary), live genre crates, genre suggestions
+    """
+    CREATE TABLE genres (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        norm       TEXT NOT NULL UNIQUE,
+        parent_id  INTEGER REFERENCES genres(id),
+        position   INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE genre_aliases (
+        norm     TEXT PRIMARY KEY,
+        genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE
+    );
+    CREATE TABLE genre_ignored (norm TEXT PRIMARY KEY);
+    CREATE TABLE track_genres (
+        track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (track_id, genre_id)
+    );
+    CREATE INDEX idx_track_genres_genre ON track_genres(genre_id);
+    ALTER TABLE tracks ADD COLUMN rekordbox_genre TEXT;
+    ALTER TABLE tracks ADD COLUMN file_genre TEXT;
+    ALTER TABLE crates ADD COLUMN genre_id INTEGER REFERENCES genres(id) ON DELETE SET NULL;
+    CREATE TABLE genre_suggest (
+        track_id   INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        items_json TEXT NOT NULL,
+        status     TEXT NOT NULL,
+        fetched_at REAL NOT NULL
+    );
+    CREATE TABLE mb_artist_genres (
+        mbid        TEXT PRIMARY KEY,
+        genres_json TEXT NOT NULL,
+        fetched_at  REAL NOT NULL
+    )
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 CHECK_VERSION_SQL = (
@@ -436,7 +475,12 @@ def track_to_dict(row) -> dict:
 
 def get_track(conn, track_id: int):
     row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
-    return track_to_dict(row) if row else None
+    if not row:
+        return None
+    from . import genres
+    t = track_to_dict(row)
+    genres.attach(conn, [t])
+    return t
 
 
 def add_to_crate(conn, crate_id: int, track_ids) -> int:

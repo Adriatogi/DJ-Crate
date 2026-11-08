@@ -89,6 +89,21 @@ export async function showSettings() {
   // ---- Rekordbox
   const rbCard = rekordboxCard(card, store.status?.rekordbox || {});
 
+  // ---- Genres
+  const gl = store.status?.genres || {};
+  const glToggle = h("input", { type: "checkbox", class: "sel", checked: !!gl.on });
+  glToggle.addEventListener("change", async () => {
+    try { await put("/api/genres/lookup", { on: glToggle.checked }); emit("poll"); setTimeout(showSettings, 300); } catch (e) { errorToast(e); }
+  });
+  const genresCard = card("Genres",
+    h("p", {}, "Your genres live in the ", h("b", {}, "Genre Rack"), " tab: a list you build, with sub-genres. Songs only get genres from it. DJ Crate writes them into each MP3's Genre tag as “Parent / Sub-genre”, so Rekordbox shows them."),
+    h("p", { class: "muted small" }, "In Rekordbox, a song it already has needs right-click → Reload Tag to pick up a changed genre (to be confirmed once tried). A ⚠ next to a song's genre means Rekordbox currently has something different."),
+    h("label", { class: "row gap", style: { cursor: "pointer" } }, glToggle, "Suggest genres from MusicBrainz (looks up songs in the background, about one per second)"),
+    gl.on ? h("p", {}, gl.paused_until
+      ? "⏸ MusicBrainz is busy or unreachable — trying again in a few minutes."
+      : gl.pending ? `Looking up songs… ${gl.looked_up} done, ${gl.pending} to go.` : `All songs looked up (${gl.found} had suggestions).`) : null,
+    h("p", { class: "muted small" }, "Suggestions are faint chips in a song's Genre cell (one click to use) and in its [+] dropdown. Nothing is applied until you click one. MusicBrainz knows many songs only by their artist's genres (shown with a dashed outline), and some not at all. Songs that already have a genre in Rekordbox or their MP3 are skipped."));
+
   // ---- Library
   const libName = h("input", { value: s.library_name, style: { width: "260px" } });
   libName.addEventListener("change", async () => {
@@ -171,7 +186,7 @@ export async function showSettings() {
     h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")),
     h("p", { class: "muted small" }, `DJ Crate ${store.status?.version || ""}`));
 
-  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, libraryCard, downloadsCard, backupsCard, troubleCard));
+  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, genresCard, libraryCard, downloadsCard, backupsCard, troubleCard));
 }
 
 export async function updateYtdlp(btn) {
@@ -267,6 +282,7 @@ function rekordboxCard(card, rb) {
       h("li", {}, "In Rekordbox: File → ", h("b", {}, "Export Collection in xml format"), ", e.g. into your library folder."),
       h("li", {}, "Choose that file here. Re-export whenever you analyse or fix songs.")),
     ...inLine,
+    h("p", { class: "muted small" }, "The Genre in that file is read too. It shows as a suggestion on songs with no genre yet, and as a ⚠ if it differs from the genre DJ Crate writes. DJ Crate's own genres are never changed by it."),
     h("h4", {}, "Send crates & sets to Rekordbox"),
     h("label", { class: "row gap", style: { cursor: "pointer" } }, toggle, "Send my crates & sets to Rekordbox"),
     h("p", { class: "muted small" }, "When this is on, DJ Crate creates ", h("code", {}, "DJ Crate for Rekordbox.xml"),
@@ -280,5 +296,5 @@ function rekordboxCard(card, rb) {
       h("li", {}, "Rekordbox → Preferences → Advanced → Database → rekordbox xml → Imported Library: choose that file."),
       h("li", {}, "Preferences → View → Layout: tick “rekordbox xml” so it shows in the sidebar."),
       h("li", {}, "In that section, right-click a playlist → Import Playlist. Do it again after changing a crate.")),
-    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order, and notes become each song's Comments. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
+    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order. Your notes stay in DJ Crate. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
 }

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from . import db, library, tags, tools
+from . import db, genres, library, tags, tools
 
 log = logging.getLogger("djcrate.downloader")
 
@@ -420,6 +420,11 @@ class DownloadManager:
         dur = tags.duration_ms(mp3)
         tag_error = None
         try:
+            gconn = self.state.conn()
+            try:
+                track = {**track, "genre_tag": genres.genre_tag_for(gconn, track["id"])}  # re-downloads keep their rack genres
+            finally:
+                gconn.close()
             cover, mime = self._cover(track.get("cover_url"))
             tags.write_tags(mp3, track, cover, mime)
         except Exception as e:

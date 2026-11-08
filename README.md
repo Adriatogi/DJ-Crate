@@ -11,13 +11,14 @@ Tools like spotdl download your Spotify playlists by guessing the YouTube video.
 5. Plan sets in **Set Setter**: an ordered running list with cue times, transition notes and running time, exportable as text.
 
 6. **BPM & key from Rekordbox.** Export your collection as XML from Rekordbox and DJ Crate shows sortable BPM and Key columns (`8A · Am`), refreshing whenever you re-export.
-7. **Send crates & sets to Rekordbox.** Crates, folders and sets become playlists (notes become Comments) in a separate `DJ Crate for Rekordbox.xml` that DJ Crate writes and keeps up to date by itself; you never make or edit it. Rekordbox matches songs by file path, so there are no duplicates.
+7. **Send crates & sets to Rekordbox.** Crates, folders and sets become playlists in a separate `DJ Crate for Rekordbox.xml` that DJ Crate writes and keeps up to date by itself; you never make or edit it. Rekordbox matches songs by file path, so there are no duplicates.
 
 Everything stays on your Mac. DJ Crate runs as a normal app window; no browser tab or terminal is needed. Open the **Docs** tab inside the app for everything it does and why.
 
 **Philosophy:** the DJ decides. There is no recommendation algorithm and no auto-mixing. DJ Crate remembers what you found and shows facts, but you pick what plays next.
 
 ---
+8. **Genre Rack.** Your own list of genres and sub-genres (a tab of its own). Songs only get genres from it, so spellings never drift; DJ Crate writes them into each MP3's Genre tag for Rekordbox, shows a ⚠ when Rekordbox has something different, and can turn any genre into a live crate. The tab shows genres as cards you drill into, keeps an Unsorted card for songs with no genre, and lists the MusicBrainz genres your songs might need (searchable across all ~2,200). Suggestions from Rekordbox, your MP3s and MusicBrainz appear as faint chips in a song's Genre cell (with a [+] square for the full dropdown); nothing is applied on its own.
 
 ## Install (macOS)
 
@@ -91,7 +92,7 @@ Each person logs in to their own Spotify account. They can create their own deve
 ### Links and downloads
 - Paste a link into the row, or use **Find ▾**. Green means the result's length matches Spotify's, and ⚠ marks a different version.
 - **Find remembers results** for a week ("Saved results · Search again"). When you open Find, DJ Crate also quietly searches the **next 3 songs** that need a link, so theirs open instantly. Change this under **Settings → Downloads → Search ahead**, from 0 (off) to 10 max. If YouTube rate-limits the searches, it tells you and pauses for 3 minutes.
-- Files are saved as **`Title - Artist.mp3`**, with all artists, features included. They're tagged with title, artists, album, year, ISRC and cover art, and your **notes go into the comment tag**.
+- Files are saved as **`Title - Artist.mp3`**, with all artists, features included. They're tagged with title, artists, album, year, ISRC and cover art. The comment tag is never touched, so Rekordbox's Comments stay yours.
 - **Format: MP3, constant 192 kbps.** YouTube's audio is about 130 kbps, so higher bitrates don't add quality. Constant bitrate on purpose: variable-bitrate MP3s can make cue points drift between Rekordbox and CDJs.
 - **⚠ Check Version:** if a download is more than 5 seconds off Spotify's length, you probably got a different version. If you cut the song on purpose, tick **Edited** and the warning goes away.
 - **▶** previews a downloaded song in a player under its row. Drag the slider to skip around; **Space** plays and pauses, **Esc** closes.
@@ -133,7 +134,9 @@ DJ Crate and Rekordbox stay **separate on purpose**, with one shared music folde
 
 **BPM and key** come from Rekordbox's own analysis (so your fixes count), through its XML export. In Rekordbox: File → **Export Collection in xml format**. In DJ Crate: **Settings → Rekordbox → Choose XML file…**. Re-export over the same file and DJ Crate updates within ~10 seconds.
 
-**Crates and sets go the other way** via **Settings → Rekordbox → Send crates & sets**, which keeps `DJ Crate for Rekordbox.xml` up to date in the library folder. In Rekordbox, point *Preferences → Advanced → Database → rekordbox xml* at it, then import playlists from the "rekordbox xml" sidebar section. Only identity and notes are sent; never BPM, key, grids or cues. (Menu names are to be confirmed against a real Rekordbox.)
+**Genres** live in DJ Crate's **Genre Rack** tab. They are written into the MP3's Genre tag as `Parent / Sub-genre`, which Rekordbox shows in its Genre column; for songs Rekordbox already has, use right-click → Reload Tag there (to be confirmed). DJ Crate never touches the comment tag, so Rekordbox's Comments (and anything My Tag adds to them) stay yours. The Genre in your Rekordbox XML is read too, as a suggestion or a ⚠ when it differs. MusicBrainz is asked (slowly, in the background; switch it off in Settings → Genres) for suggestions on songs with no genre.
+
+**Crates and sets go the other way** via **Settings → Rekordbox → Send crates & sets**, which keeps `DJ Crate for Rekordbox.xml` up to date in the library folder. In Rekordbox, point *Preferences → Advanced → Database → rekordbox xml* at it, then import playlists from the "rekordbox xml" sidebar section. Only song identity is sent; never notes, BPM, key, grids or cues. (Menu names are to be confirmed against a real Rekordbox.)
 
 **Don't rename or move MP3s in Finder.** DJ Crate never renames a file after downloading it, so Rekordbox keeps its link. Edit names in DJ Crate; that changes the tags, not the filename. If a file does go missing, DJ Crate marks it with a red **!**, the same as Rekordbox. Use **Relocate…** for one file, or **⋯ → Auto Relocate** to search a folder.
 
@@ -192,6 +195,6 @@ python3 scripts/make_icon.py             # regenerate the app icon
 
 - **Backend:** Python 3.12–3.13, FastAPI + uvicorn on `127.0.0.1:8765`, shown in a pywebview window. Data is in SQLite at `<library>/.djcrate/djcrate.db`. yt-dlp runs as a subprocess, ffmpeg converts, and mutagen writes the tags.
 - **Frontend:** plain HTML/CSS/JS modules in `djcrate/web/`, with no build step.
-- **Layout:** `djcrate/api.py` (routes), `db.py` (schema and migrations), `downloader.py` (queue and error handling), `spotify.py`, `yt_search.py`, `library.py` (files, relocate, import), `rekordbox.py` (XML in/out), `backup.py`, `state.py` (open library, lock, health), `main.py` (window).
+- **Layout:** `djcrate/api.py` (routes), `db.py` (schema and migrations), `downloader.py` (queue and error handling), `spotify.py`, `yt_search.py`, `library.py` (files, relocate, import), `rekordbox.py` (XML in/out), `genres.py` (Genre Rack), `genre_lookup.py` (MusicBrainz suggestions), `backup.py`, `state.py` (open library, lock, health), `main.py` (window).
 
 Downloading from YouTube may break YouTube's terms of service. DJ Crate only downloads links you choose; use it for music you have the right to use.

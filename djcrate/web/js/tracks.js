@@ -2,6 +2,7 @@
 // multi-select (checkboxes only — no Shift-click ranges) and bulk actions.
 
 import { get, native, patch, post } from "./api.js";
+import { genreControl, openBulkGenre } from "./genrepicker.js";
 import { drag } from "./sidebar.js";
 import { LINK_RE, emit, flatCrates, findCrate, on, store } from "./store.js";
 import {
@@ -86,6 +87,10 @@ function renderEmpty() {
     content = c?.kind === "folder"
       ? [h("h3", {}, "This folder has no songs yet"), h("p", {}, "Make crates inside it, or drag crates in from the sidebar.")]
       : [h("h3", {}, "This crate is empty"), h("p", {}, "Go to All Tracks, tick some songs and use “Add to crate”, or drag rows onto this crate.")];
+  } else if (v === "genre:none") {
+    content = [h("h3", {}, "Every song has a genre. 🎉"), h("p", {}, "Songs with no genre show up here.")];
+  } else if (v.startsWith("genre:")) {
+    content = [h("h3", {}, "No songs with this genre yet"), h("p", {}, "Use the big “+ Add songs” button below to pick some from your library.")];
   } else {
     const msgs = {
       "smart:needs_link": "Every song has a link. 🎉",
@@ -136,6 +141,7 @@ function rowFor(t) {
     h("td", { class: "c-time muted" }, fmtMs(t.duration_ms ?? t.file_duration_ms)),
     h("td", { class: "c-bpm muted", title: t.bpm ? "" : NO_ANALYSIS }, fmtBpm(t.bpm)),
     h("td", { class: "c-key muted", title: t.musical_key ? "" : NO_ANALYSIS }, fmtKey(t.musical_key)),
+    h("td", { class: "c-genre" }, genreControl(t)),
     h("td", { class: "c-link" }, linkCell(t)),
     h("td", { class: "c-play" }, playButton(t, tr)),
     h("td", { class: "c-flag" }, flag(t, "edited")),
@@ -346,6 +352,7 @@ export function syncSelection() {
   all.checked = n > 0 && n === store.tracks.length;
   all.indeterminate = n > 0 && n < store.tracks.length;
   renderBulkbar();
+  emit("selection-changed");
 }
 
 function renderBulkbar() {
@@ -353,7 +360,8 @@ function renderBulkbar() {
   const ids = store.tracks.filter((t) => selected.has(t.id)).map((t) => t.id);
   if (!ids.length) { bar.hidden = true; return; }
   bar.hidden = false;
-  const inCrate = store.view.startsWith("crate:") && findCrate(Number(store.view.split(":")[1]))?.kind !== "folder";
+  const viewCrate = store.view.startsWith("crate:") ? findCrate(Number(store.view.split(":")[1])) : null;
+  const inCrate = !!viewCrate && viewCrate.kind !== "folder" && !viewCrate.genre_id; // genre crates follow their genre
   const markBtn = h("button", { class: "btn small" }, "Mark ▾");
   markBtn.onclick = () => menu(markBtn, [
     { label: "Edited ✓", fn: () => bulk(ids, "edited", true) },
@@ -372,9 +380,11 @@ function renderBulkbar() {
       ? crates.map((c) => ({ label: c.path, fn: () => addToCrate(ids, c) }))
       : [{ label: "No crates yet — make one with +♪", disabled: true, fn: () => {} }]);
   };
+  const genreBtn = h("button", { class: "btn small" }, "Genre ▾");
+  genreBtn.onclick = () => openBulkGenre(genreBtn, ids);
   fill(bar,
     h("span", { class: "count" }, `${ids.length} selected`),
-    markBtn, addBtn,
+    markBtn, addBtn, genreBtn,
     h("button", { class: "btn small", onclick: () => startDownloads(ids) }, "⬇ Download"),
     inCrate ? h("button", { class: "btn small", onclick: () => removeFromCrate(ids) }, "Remove from crate") : null,
     h("button", { class: "btn small danger", onclick: () => deleteFromLibrary(ids) }, "Delete from library…"),
@@ -607,6 +617,7 @@ export function initTracks() {
     else selected.clear();
     syncSelection();
   });
+  on("track-genres", updateTrack);
   on("detail-changed", () => {
     for (const [id, { tr }] of rows) tr.classList.toggle("open", store.detailId === id);
   });

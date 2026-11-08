@@ -1,8 +1,9 @@
-// The song card: edit metadata, notes (written into the MP3's tags), flags and
+// The song card: edit metadata, genres, notes (kept in DJ Crate), flags and
 // samples. One card for the whole app: the Crates side panel, and Cutting's
 // right panel (via songCard).
 
 import { patch, post } from "./api.js";
+import { genreControl } from "./genrepicker.js";
 import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
 import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast } from "./ui.js";
@@ -78,9 +79,10 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
         t.spotify_url ? h("a", { href: "#", class: "small", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.spotify_url }); } }, "Open in Spotify ↗") : null,
         extra)),
     h("div", { class: "flags-row" }, flag("edited", "Edited"), flag("ready", "Ready"), flag("broken", "Broken")),
+    h("div", { class: "field" }, h("label", {}, "Genre"), genreControl(t, { onSaved, max: 6 }),
+      t.genres.length ? h("div", { class: "muted small", style: { marginTop: "4px" } },
+        `Written into the MP3 as “${t.genre_tag}”. In Rekordbox: right-click the song → Reload Tag.`) : null),
     field("Notes", "notes", { multiline: true, placeholder: "Anything about this song — drop at 1:04, vocal comes in late, pairs well with…" }),
-    h("div", { class: "muted small", style: { marginTop: "-6px", marginBottom: "10px" } },
-      "Notes are also written into the MP3's comment tag, so they show in Rekordbox's Comments column (use Reload Tag there after edits)."),
     samplesSection(t, { openSong, openTitle, onChange: onSamplesChange }),
     h("div", { class: "section-title" }, "Metadata"),
     field("Title", "title"),

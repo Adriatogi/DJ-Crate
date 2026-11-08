@@ -1,13 +1,14 @@
 """ID3 tag read/write with mutagen.
 
 Tags are written as ID3v2.3, which Rekordbox and CDJs read most reliably.
-Notes go into the comment frame so they show in Rekordbox's Comments column.
+The comment frame is never touched, so Rekordbox's Comments field stays yours
+(your DJ Crate notes live in DJ Crate only).
 """
 
 import logging
 from pathlib import Path
 
-from mutagen.id3 import APIC, COMM, ID3, TALB, TDRC, TIT2, TPE1, TSRC, ID3NoHeaderError
+from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TSRC, ID3NoHeaderError
 from mutagen.mp3 import MP3
 
 log = logging.getLogger("djcrate.tags")
@@ -30,9 +31,11 @@ def write_tags(path: Path, track: dict, cover: bytes | None = None, cover_mime: 
         tags.delall("TDRC")
     if track.get("isrc"):
         tags.setall("TSRC", [TSRC(encoding=3, text=track["isrc"])])
-    tags.delall("COMM")
-    if track.get("notes"):
-        tags.add(COMM(encoding=3, lang="eng", desc="", text=track["notes"]))
+    genre = track.get("genre_tag")  # None = leave the file's genre alone; "" = empty it
+    if genre:
+        tags.setall("TCON", [TCON(encoding=3, text=genre)])
+    elif genre == "":
+        tags.delall("TCON")
     if cover:
         tags.delall("APIC")
         tags.add(APIC(encoding=3, mime=cover_mime, type=3, desc="Cover", data=cover))
@@ -64,6 +67,7 @@ def read_tags(path: Path) -> dict:
         "album": text("TALB"),
         "release_date": text("TDRC")[:10],
         "isrc": text("TSRC") or None,
+        "genre": " / ".join(str(v) for v in tags["TCON"].text if str(v).strip()) if "TCON" in tags else "",
         "file_duration_ms": int(audio.info.length * 1000),
     }
 

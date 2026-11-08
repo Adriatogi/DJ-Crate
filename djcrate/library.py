@@ -148,6 +148,8 @@ def import_folder(state, conn, folder: Path) -> dict:
                     "UPDATE tracks SET file_rel_path = ?, file_duration_ms = ?, download_status = 'done' WHERE id = ?",
                     (rel, meta["file_duration_ms"], tid),
                 )
+            if meta.get("genre"):
+                conn.execute("UPDATE tracks SET file_genre = ? WHERE id = ?", (meta["genre"], tid))
             if not created:
                 existing += 1
             imported.append(tid)
