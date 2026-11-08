@@ -39,15 +39,24 @@ export const del = (p) => api("DELETE", p);
 // Native bits from the pywebview window; prompts as a fallback in a plain browser.
 const bridge = () => window.pywebview && window.pywebview.api;
 
+// In a browser tab the backend opens the macOS Finder picker (browsers hide real paths).
+async function serverPick(body, promptText) {
+  try {
+    return (await post("/api/pick", body)).path;
+  } catch {
+    return window.prompt(promptText) || null;
+  }
+}
+
 export const native = {
   get available() { return !!bridge(); },
   async pickFolder(promptText = "Folder path:") {
     if (bridge()) return await bridge().pick_folder();
-    return window.prompt(promptText) || null;
+    return serverPick({ kind: "folder" }, promptText);
   },
   async pickFile(kind = "mp3", promptText = "File path:") {
     if (bridge()) return await bridge().pick_file(kind);
-    return window.prompt(promptText) || null;
+    return serverPick({ kind: "file", extensions: kind === "xml" || kind === "mp3" || kind === "zip" ? [kind] : [] }, promptText);
   },
   async restart() {
     if (bridge()) return await bridge().restart();

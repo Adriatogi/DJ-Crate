@@ -102,5 +102,17 @@ def reveal(path: Path) -> None:
     subprocess.run(["open", "-R", str(path)] if path.is_file() else ["open", str(path)], check=False)
 
 
+def pick_path(kind: str = "file", extensions: tuple = ()) -> str | None:
+    """Native macOS Finder picker for when the app runs in a browser tab. None if cancelled."""
+    what = "folder" if kind == "folder" else "file"
+    types = " of type {%s}" % ", ".join(f'"{e}"' for e in extensions) if extensions and what == "file" else ""
+    script = f'POSIX path of (choose {what} with prompt "Choose a {what}"{types})'
+    try:
+        out = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip().rstrip("\n") or None if out.returncode == 0 else None
+
+
 def open_url(url: str) -> None:
     subprocess.run(["open", url], check=False)

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, backup, db, library, spotify, tags, tools, yt_search
+from . import __version__, backup, cutting, db, genius, genre_lookup, genres, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -26,11 +26,13 @@ COOKIE_BROWSERS = ("", "safari", "chrome", "firefox", "edge", "brave", "chromium
 
 app = FastAPI(title="DJ Crate", docs_url=None, redoc_url=None)
 downloads = DownloadManager(state)
+search_ahead = yt_search.Prefetcher(state)
+genre_finder = genre_lookup.Finder(state)
 hooks: dict[str, Any] = {"focus": None}
 
 # Routes that must keep working in read-only mode / without a library.
 READ_ONLY_ALLOWED = (
-    "/api/library/", "/api/reveal", "/api/open_url", "/api/focus", "/api/tools/", "/api/spotify/login",
+    "/api/library/", "/api/reveal", "/api/pick", "/api/rekordbox/export/reveal", "/api/open_url", "/api/focus", "/api/tools/", "/api/spotify/login",
     "/api/spotify/cancel_login", "/api/spotify/logout", "/api/backup/export", "/api/errors/clear",
 )
 
@@ -102,7 +104,7 @@ def status():
     lib = {
         "status": state.status, "path": str(state.library) if state.library else None, "error": state.error,
         "read_only": state.read_only, "lock_info": state.lock_info, "host": state.host,
-        "default_path": str(DEFAULT_LIBRARY),
+        "default_path": str(DEFAULT_LIBRARY), "name": None, "ask_on_launch": libraries.ask_on_launch(),
     }
     if state.status == "ok" and not state.library_reachable():
         state.status = lib["status"] = "library_missing"
@@ -115,6 +117,8 @@ def status():
         "queue": {"paused_reason": downloads.paused_reason, "queued": 0, "running": 0, "failed": 0,
                   "interrupted": 0, "outdated": 0},
         "errors_count": len(state.app_errors),
+        "search": {"paused_until": search_ahead.paused_until if search_ahead.paused else None},
+        "genius": {"configured": False},
     }
     if state.status in ("db_corrupt", "migration_failed"):
         out["backups"] = backup.list_backups(state)
@@ -122,8 +126,12 @@ def status():
         conn = state.conn()
         try:
             client_id = db.get_setting(conn, "spotify_client_id", "")
+            lib["name"] = db.get_setting(conn, "library_name") or (state.library.name if state.library else None)
             out["spotify"]["client_id_set"] = bool(client_id)
-            out["spotify"]["connected"] = spotify_connected(client_id)
+            out["spotify"]["connected"] = spotify_connected(client_id, db.get_setting(conn, "library_id"))
+            out["genius"]["configured"] = genius.configured(db.get_setting(conn, "library_id"))
+            out["rekordbox"] = rekordbox.status(conn)
+            out["genres"] = genre_lookup.status(conn, genre_finder)
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
@@ -136,18 +144,34 @@ def status():
     return out
 
 
-_connected_cache: dict[str, bool] = {}
+_connected_cache: dict[tuple, bool] = {}
 
 
-def spotify_connected(client_id: str) -> bool:
+def spotify_connected(client_id: str, owner: str | None) -> bool:
     if not client_id:
         return False
-    if client_id not in _connected_cache:
-        _connected_cache[client_id] = spotify.load_tokens(client_id) is not None
-    return _connected_cache[client_id]
+    key = (client_id, owner)
+    if key not in _connected_cache:
+        _connected_cache[key] = spotify.load_tokens(client_id, owner) is not None
+    return _connected_cache[key]
+
+
+def _on_library_opened():
+    # A different library means a different Spotify login.
+    _connected_cache.clear()
+    genius._configured.clear()
+    spotify._me_cache.clear()
+    spotify.cancel_login()
+
+
+state.on_opened.append(_on_library_opened)
 
 
 # ---------------------------------------------------------------- library lifecycle
+
+class NameBody(BaseModel):
+    name: str
+
 
 class PathBody(BaseModel):
     path: str
@@ -174,6 +198,62 @@ def default_library():
     return status()
 
 
+@app.get("/api/libraries")
+def list_libraries():
+    current = state.library if state.status == "ok" else None
+    return {"libraries": libraries.describe(current), "ask_on_launch": libraries.ask_on_launch(),
+            "libraries_dir": str(libraries.LIBRARIES_DIR)}
+
+
+@app.post("/api/library/new")
+def new_library(body: NameBody):
+    folder = libraries.new_library_path(body.name)
+    state.open(folder)
+    if state.status == "ok":
+        conn = state.conn()
+        try:
+            db.set_setting(conn, "library_name", body.name.strip())
+        finally:
+            conn.close()
+    return status()
+
+
+class ForgetBody(BaseModel):
+    path: str
+
+
+@app.post("/api/library/forget")
+def forget_library(body: ForgetBody):
+    """Remove from the list only — never deletes the folder."""
+    libraries.forget(body.path)
+    return list_libraries()
+
+
+class LibraryPrefs(BaseModel):
+    ask_on_launch: bool
+
+
+@app.post("/api/library/prefs")
+def library_prefs(body: LibraryPrefs):
+    libraries.set_ask_on_launch(body.ask_on_launch)
+    return {"ask_on_launch": libraries.ask_on_launch()}
+
+
+@app.post("/api/library/switch")
+def switch_library():
+    if state.status == "ok":
+        conn = state.conn()
+        try:
+            busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('running', 'queued')").fetchone()[0]
+        finally:
+            conn.close()
+        if busy:
+            raise AppError("busy", f"{busy} download{'s are' if busy != 1 else ' is'} in progress. Let them finish (or Cancel all in Activity), then switch.")
+    state.close()
+    _on_library_opened()
+    return status()
+
+
 @app.post("/api/library/retry")
 def retry_library():
     if state.library:
@@ -191,10 +271,6 @@ def take_over():
 def open_read_only():
     state.open(state.library, read_only=True)
     return status()
-
-
-class NameBody(BaseModel):
-    name: str
 
 
 @app.post("/api/library/restore")
@@ -278,10 +354,10 @@ def sidebar(conn=Depends(get_conn)):
     crates = [dict(r) for r in conn.execute("SELECT * FROM crates ORDER BY position, id")]
     members: dict[int, dict[int, tuple]] = {}
     for r in conn.execute(
-        "SELECT ct.crate_id, ct.track_id, t.download_status = 'done' d, t.cleaned, t.verified "
+        "SELECT ct.crate_id, ct.track_id, t.download_status = 'done' d "
         "FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id"
     ):
-        members.setdefault(r[0], {})[r[1]] = (r[2], r[3], r[4])
+        members.setdefault(r[0], {})[r[1]] = (r[2],)
     children: dict[int | None, list[dict]] = {}
     for c in crates:
         children.setdefault(c["parent_id"], []).append(c)
@@ -294,8 +370,7 @@ def sidebar(conn=Depends(get_conn)):
         flags = list(tracks.values())
         return {
             **c, "children": kids, "_tracks": tracks,
-            "stats": {"total": len(flags), "downloaded": sum(f[0] for f in flags),
-                      "cleaned": sum(f[1] for f in flags), "verified": sum(f[2] for f in flags)},
+            "stats": {"total": len(flags), "downloaded": sum(f[0] for f in flags)},
         }
 
     tree = [build(c) for c in children.get(None, [])]
@@ -394,6 +469,7 @@ def add_tracks_to_crate(crate_id: int, body: IdsBody, conn=Depends(get_conn)):
         raise AppError("not_found", "That crate doesn't exist anymore.", 404)
     if crate["kind"] == "folder":
         raise AppError("is_folder", "Drop songs onto a crate, not a folder.")
+    genres.guard_not_genre_crate(conn, crate_id)
     with db.tx(conn):
         added = db.add_to_crate(conn, crate_id, body.ids)
     return {"added": added, "already": len(body.ids) - added}
@@ -402,6 +478,7 @@ def add_tracks_to_crate(crate_id: int, body: IdsBody, conn=Depends(get_conn)):
 @app.post("/api/crates/{crate_id}/tracks/remove")
 def remove_tracks_from_crate(crate_id: int, body: IdsBody, conn=Depends(get_conn)):
     """Only removes membership. Returns the removed rows so the UI can Undo."""
+    genres.guard_not_genre_crate(conn, crate_id)
     rows = [dict(r) for r in conn.execute(
         f"SELECT * FROM crate_tracks WHERE crate_id = ? AND track_id IN ({placeholders(body.ids)})", (crate_id, *body.ids))]
     with db.tx(conn):
@@ -415,6 +492,7 @@ class RestoreRows(BaseModel):
 
 @app.post("/api/crates/{crate_id}/tracks/restore")
 def restore_tracks_to_crate(crate_id: int, body: RestoreRows, conn=Depends(get_conn)):
+    genres.guard_not_genre_crate(conn, crate_id)
     with db.tx(conn):
         for r in body.rows:
             conn.execute(
@@ -434,13 +512,14 @@ LEFT JOIN (SELECT track_id, id job_id, status job_status, progress job_progress,
 
 
 @app.get("/api/tracks")
-def list_tracks(view: str = "smart:all", q: str = "", conn=Depends(get_conn)):
+def list_tracks(view: str = "smart:all", q: str = "", sub: int = 1, artist: str = "", others: int = 0, nogenre: int = 0, ingenre: int = 0, conn=Depends(get_conn)):
     params: list = []
     search = ""
     if q.strip():
         like = f"%{q.strip()}%"
-        search = " AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ? OR t.notes LIKE ?)"
-        params_search = [like] * 4
+        search = (" AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ? OR t.notes LIKE ? OR t.id IN "
+                  "(SELECT tg.track_id FROM track_genres tg JOIN genres g ON g.id = tg.genre_id WHERE g.name LIKE ?))")
+        params_search = [like] * 5
     else:
         params_search = []
     if view.startswith("crate:"):
@@ -458,6 +537,28 @@ def list_tracks(view: str = "smart:all", q: str = "", conn=Depends(get_conn)):
             sql = (f"SELECT t.*, j.*, ct.removed_from_source, ct.position FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id "
                    f"{JOB_JOIN} WHERE ct.crate_id = ?{search} ORDER BY ct.removed_from_source, ct.position")
             params = [crate_id, *params_search]
+    elif view.startswith("genre:"):
+        key = view.split(":", 1)[1]
+        if key == "none":
+            cond, gparams = "NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id)", []
+        else:
+            try:
+                gid = int(key)
+            except ValueError:
+                raise AppError("not_found", "Unknown view.", 404)
+            genres.get(conn, gid)
+            gids = genres.descendants(conn, gid) if sub else [gid]
+            # others=1 flips it: every song that is NOT in this genre (to pick songs to add)
+            cond = f"t.id {'NOT ' if others else ''}IN (SELECT track_id FROM track_genres WHERE genre_id IN ({placeholders(gids)}))"
+            gparams = gids
+            if others and nogenre:  # only songs that have no genre at all yet
+                cond += " AND NOT EXISTS (SELECT 1 FROM track_genres g2 WHERE g2.track_id = t.id)"
+            elif others and ingenre:  # only songs that are in another given genre (or its sub-genres)
+                fids = genres.descendants(conn, ingenre)
+                cond += f" AND t.id IN (SELECT track_id FROM track_genres WHERE genre_id IN ({placeholders(fids)}))"
+                gparams = [*gparams, *fids]
+        sql = f"SELECT t.*, j.* FROM tracks t {JOB_JOIN} WHERE {cond}{search} ORDER BY t.title COLLATE NOCASE, t.artists COLLATE NOCASE"
+        params = [*gparams, *params_search]
     else:
         key = view.split(":", 1)[1] if ":" in view else "all"
         if key not in db.SMART_CRATES:
@@ -465,7 +566,12 @@ def list_tracks(view: str = "smart:all", q: str = "", conn=Depends(get_conn)):
         cond = db.SMART_CRATES[key][1]
         sql = f"SELECT t.*, j.* FROM tracks t {JOB_JOIN} WHERE {cond}{search} ORDER BY t.title COLLATE NOCASE, t.artists COLLATE NOCASE"
         params = params_search
-    return {"tracks": [db.track_to_dict(r) for r in conn.execute(sql, params)]}
+    out = [db.track_to_dict(r) for r in conn.execute(sql, params)]
+    if artist.strip():
+        want = genres.norm(artist)
+        out = [t for t in out if want in {genres.norm(a) for a in genres.split_artists(t["artists"])}]
+    genres.attach(conn, out)
+    return {"tracks": out}
 
 
 class NewTrack(BaseModel):
@@ -500,12 +606,9 @@ class TrackPatch(BaseModel):
     release_date: str | None = None
     notes: str | None = None
     source_url: str | None = None
-    edited: bool | None = None
-    cleaned: bool | None = None
-    verified: bool | None = None
 
 
-TAG_FIELDS = ("title", "artists", "album", "release_date", "notes")
+TAG_FIELDS = ("title", "artists", "album", "release_date")
 
 
 @app.patch("/api/tracks/{track_id}")
@@ -526,9 +629,6 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
             dupe = conn.execute("SELECT title, artists FROM tracks WHERE source_url = ? AND id <> ?", (url, track_id)).fetchone()
             if dupe:
                 warnings.append(f"This link is already used by “{dupe['title']} – {dupe['artists']}”. Kept anyway.")
-    for k in ("edited", "cleaned", "verified"):
-        if k in changes:
-            changes[k] = int(changes[k])
     if not changes:
         return {"track": track, "warnings": warnings}
     with db.tx(conn):
@@ -537,11 +637,6 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
         if "title" in changes or "artists" in changes:
             t = conn.execute("SELECT title, artists FROM tracks WHERE id = ?", (track_id,)).fetchone()
             conn.execute("UPDATE tracks SET norm_key = ? WHERE id = ?", (db.norm_key(t["title"], t["artists"]), track_id))
-        if "edited" in changes and track["file_rel_path"]:
-            # Re-check the length against the file as it is now.
-            p = state.abs_path(track["file_rel_path"])
-            if p and p.is_file():
-                conn.execute("UPDATE tracks SET file_duration_ms = ? WHERE id = ?", (tags.duration_ms(p), track_id))
     updated = db.get_track(conn, track_id)
     if any(k in changes for k in TAG_FIELDS):
         warn = _write_file_tags(conn, updated, fetch_cover=False)
@@ -551,13 +646,13 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
     return {"track": updated, "warnings": warnings}
 
 
-def _write_file_tags(conn, track: dict, fetch_cover: bool) -> str | None:
+def _write_file_tags(conn, track: dict, fetch_cover: bool, clear_genre: bool = False) -> str | None:
     p = state.abs_path(track.get("file_rel_path"))
     if not p or not p.is_file() or track["download_status"] != "done":
         return None
     try:
         cover, mime = downloads._cover(track.get("cover_url")) if fetch_cover else (None, "image/jpeg")
-        tags.write_tags(p, track, cover, mime)
+        tags.write_tags(p, {**track, "genre_tag": genres.genre_tag_for(conn, track["id"], clear=clear_genre)}, cover, mime)
         conn.execute("UPDATE tracks SET tag_error = NULL WHERE id = ?", (track["id"],))
         return None
     except Exception as e:
@@ -576,24 +671,6 @@ def retag(track_id: int, conn=Depends(get_conn)):
     if warn:
         raise AppError("tag_failed", warn)
     return {"track": db.get_track(conn, track_id)}
-
-
-class BulkBody(BaseModel):
-    ids: list[int]
-    field: str
-    value: bool
-
-
-@app.post("/api/tracks/bulk")
-def bulk_update(body: BulkBody, conn=Depends(get_conn)):
-    if body.field not in ("edited", "cleaned", "verified"):
-        raise AppError("bad_field", "Unknown field.")
-    with db.tx(conn):
-        conn.execute(
-            f"UPDATE tracks SET {body.field} = ?, updated_at = datetime('now') WHERE id IN ({placeholders(body.ids)})",
-            (int(body.value), *body.ids),
-        )
-    return {"updated": len(body.ids)}
 
 
 @app.post("/api/tracks/delete")
@@ -633,11 +710,29 @@ def track_audio(track_id: int, conn=Depends(get_conn)):
 
 
 @app.get("/api/tracks/{track_id}/yt_search")
-def track_yt_search(track_id: int, conn=Depends(get_conn)):
+def track_yt_search(track_id: int, refresh: bool = False, conn=Depends(get_conn)):
     track = db.get_track(conn, track_id)
     if not track:
         raise AppError("not_found", "That song doesn't exist anymore.", 404)
-    return yt_search.search(track)
+    try:
+        return yt_search.search(track, conn, refresh=refresh)
+    except yt_search.RateLimited:
+        search_ahead.pause()  # if YouTube is pushing back, don't add background searches on top
+        raise
+
+
+def _search_ahead_setting(conn) -> int:
+    try:
+        return int(db.get_setting(conn, "search_ahead", yt_search.AHEAD_DEFAULT))
+    except (TypeError, ValueError):
+        return yt_search.AHEAD_DEFAULT
+
+
+@app.post("/api/yt_search/ahead")
+def yt_search_ahead(body: IdsBody, conn=Depends(get_conn)):
+    """The next songs in on-screen order; searched quietly in the background."""
+    return {"queued": search_ahead.request(body.ids, _search_ahead_setting(conn)),
+            "paused_until": search_ahead.paused_until if search_ahead.paused else None}
 
 
 # ---------------------------------------------------------------- downloads / jobs
@@ -658,7 +753,7 @@ class ViewBody(BaseModel):
 
 @app.post("/api/downloads/all")
 def download_all(body: ViewBody, conn=Depends(get_conn)):
-    tracks = list_tracks(body.view, "", conn)["tracks"]
+    tracks = list_tracks(body.view, "", conn=conn)["tracks"]
     ids = [t["id"] for t in tracks if (t["source_url"] or "") and t["download_status"] in ("none", "error")]
     if not ids:
         return {"queued": 0, "skipped": []}
@@ -723,9 +818,13 @@ def _client_id(conn) -> str:
     return db.get_setting(conn, "spotify_client_id", "")
 
 
+def _owner(conn) -> str | None:
+    return db.get_setting(conn, "library_id")
+
+
 @app.post("/api/spotify/login")
 def spotify_login(conn=Depends(get_conn)):
-    url = spotify.start_login(_client_id(conn), get_port())
+    url = spotify.start_login(_client_id(conn), get_port(), _owner(conn))
     tools.open_url(url)
     return {"url": url, "redirect_uri": spotify.redirect_uri(get_port())}
 
@@ -748,7 +847,7 @@ def spotify_callback(request: Request, code: str | None = None, error: str | Non
 
 @app.post("/api/spotify/logout")
 def spotify_logout(conn=Depends(get_conn)):
-    spotify.clear_tokens(_client_id(conn))
+    spotify.clear_tokens(_client_id(conn), _owner(conn))
     _connected_cache.clear()
     spotify.cancel_login()
     return {"ok": True}
@@ -756,7 +855,7 @@ def spotify_logout(conn=Depends(get_conn)):
 
 def _spotify_client(conn) -> spotify.Client:
     try:
-        return spotify.Client(_client_id(conn))
+        return spotify.Client(_client_id(conn), _owner(conn))
     except spotify.SpotifyError:
         _connected_cache.clear()
         raise
@@ -834,12 +933,13 @@ def resync(crate_id: int, conn=Depends(get_conn)):
             "restored": len(plan["restored"]), "skipped": data["skipped"]}
 
 
-# ---------------------------------------------------------------- sets
+# ---------------------------------------------------------------- sets (boards)
 
 @app.get("/api/sets")
 def list_sets(conn=Depends(get_conn)):
     return {"sets": [dict(r) for r in conn.execute(
-        "SELECT s.*, (SELECT count(*) FROM set_items i WHERE i.set_id = s.id) items FROM sets s ORDER BY s.updated_at DESC")]}
+        "SELECT s.*, (SELECT count(*) FROM set_nodes n WHERE n.set_id = s.id AND n.kind = 'song') items "
+        "FROM sets s ORDER BY s.updated_at DESC")]}
 
 
 @app.post("/api/sets")
@@ -850,19 +950,9 @@ def create_set(body: NameBody, conn=Depends(get_conn)):
     return {"id": cur.lastrowid}
 
 
-def _set_items(conn, set_id: int) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        """SELECT i.*, t.title, t.artists, t.cover_url, t.download_status, t.cleaned, t.verified,
-                  coalesce(t.file_duration_ms, t.duration_ms) duration_ms
-           FROM set_items i LEFT JOIN tracks t ON t.id = i.track_id WHERE i.set_id = ? ORDER BY i.position""", (set_id,))]
-
-
 @app.get("/api/sets/{set_id}")
 def get_set(set_id: int, conn=Depends(get_conn)):
-    s = conn.execute("SELECT * FROM sets WHERE id = ?", (set_id,)).fetchone()
-    if not s:
-        raise AppError("not_found", "That set doesn't exist anymore.", 404)
-    return {"set": dict(s), "items": _set_items(conn, set_id)}
+    return setboard.get_board(conn, set_id)
 
 
 class SetPatch(BaseModel):
@@ -882,45 +972,61 @@ def update_set(set_id: int, body: SetPatch, conn=Depends(get_conn)):
     return {"ok": True}
 
 
-class SetItem(BaseModel):
-    track_id: int | None = None
-    free_text: str | None = None
-    label: str = ""
-    cue_time: str = ""
-    transition_note: str = ""
-    length_ms: int | None = None  # override: how long it plays in the set
+class SetBoardBody(BaseModel):
+    nodes: list[dict]
+    edges: list[dict]
 
 
-class SetItems(BaseModel):
-    items: list[SetItem]
+@app.put("/api/sets/{set_id}/board")
+def save_set_board(set_id: int, body: SetBoardBody, conn=Depends(get_conn)):
+    return setboard.replace_board(conn, set_id, body.nodes, body.edges)
 
 
-@app.put("/api/sets/{set_id}/items")
-def replace_set_items(set_id: int, body: SetItems, conn=Depends(get_conn)):
-    if not conn.execute("SELECT 1 FROM sets WHERE id = ?", (set_id,)).fetchone():
-        raise AppError("not_found", "That set doesn't exist anymore.", 404)
-    with db.tx(conn):
-        conn.execute("DELETE FROM set_items WHERE set_id = ?", (set_id,))
-        for pos, it in enumerate(body.items):
-            label = it.label
-            if it.track_id:
-                t = conn.execute("SELECT title, artists FROM tracks WHERE id = ?", (it.track_id,)).fetchone()
-                if t:
-                    label = f"{t['title']} — {t['artists']}"
-            conn.execute(
-                "INSERT INTO set_items (set_id, position, track_id, label, free_text, cue_time, transition_note, length_ms) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (set_id, pos, it.track_id, label, it.free_text, it.cue_time, it.transition_note,
-                 it.length_ms if it.length_ms and it.length_ms > 0 else None),
-            )
-        conn.execute("UPDATE sets SET updated_at = datetime('now') WHERE id = ?", (set_id,))
-    return {"items": _set_items(conn, set_id)}
+class SetNodePatch(BaseModel):
+    cue_time: str | None = None
+    length_ms: int | None = None
+    text: str | None = None
+    clear_length: bool = False
+
+
+@app.patch("/api/sets/{set_id}/nodes/{node_id}")
+def patch_set_node(set_id: int, node_id: int, body: SetNodePatch, conn=Depends(get_conn)):
+    changes = body.model_dump(exclude_none=True)
+    if changes.pop("clear_length", False):
+        changes["length_ms"] = None
+    return setboard.patch_node(conn, set_id, node_id, changes)
+
+
+class TransitionBody(BaseModel):
+    after_node: int
+    text: str
+
+
+@app.post("/api/sets/{set_id}/transition")
+def add_set_transition(set_id: int, body: TransitionBody, conn=Depends(get_conn)):
+    return setboard.add_transition(conn, set_id, body.after_node, body.text)
+
+
+@app.post("/api/sets/{set_id}/nodes/{node_id}/save_mix")
+def save_set_node_as_mix(set_id: int, node_id: int, conn=Depends(get_conn)):
+    return setboard.save_mix(conn, set_id, node_id)
+
+
+class PairBody(BaseModel):
+    a_node: int
+    b_node: int
+    text: str = ""
+
+
+@app.post("/api/sets/{set_id}/save_pair")
+def save_set_pair(set_id: int, body: PairBody, conn=Depends(get_conn)):
+    return setboard.save_pair_as_mix(conn, set_id, body.a_node, body.b_node, body.text)
 
 
 @app.delete("/api/sets/{set_id}")
 def delete_set(set_id: int, conn=Depends(get_conn)):
     """Returns a snapshot so the UI can Undo."""
-    snap = get_set(set_id, conn)
+    snap = setboard.snapshot(conn, set_id)
     with db.tx(conn):
         conn.execute("DELETE FROM sets WHERE id = ?", (set_id,))
     return {"snapshot": snap}
@@ -932,76 +1038,456 @@ class SetSnapshot(BaseModel):
 
 @app.post("/api/sets/restore")
 def restore_set(body: SetSnapshot, conn=Depends(get_conn)):
-    s, items = body.snapshot["set"], body.snapshot["items"]
-    with db.tx(conn):
-        cur = conn.execute("INSERT INTO sets (name, notes, created_at) VALUES (?, ?, ?)", (s["name"], s.get("notes", ""), s.get("created_at")))
-        sid = cur.lastrowid
-        for pos, it in enumerate(items):
-            tid = it.get("track_id")
-            if tid and not conn.execute("SELECT 1 FROM tracks WHERE id = ?", (tid,)).fetchone():
-                tid = None
-            conn.execute(
-                "INSERT INTO set_items (set_id, position, track_id, label, free_text, cue_time, transition_note, length_ms) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (sid, pos, tid, it.get("label", ""), it.get("free_text"), it.get("cue_time", ""), it.get("transition_note", ""),
-                 it.get("length_ms")),
-            )
-    return {"id": sid}
-
-
-def fmt_ms(ms: int | None) -> str:
-    if not ms:
-        return "?:??"
-    s = int(ms // 1000)
-    h, m, s = s // 3600, (s % 3600) // 60, s % 60
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-
-
-def played_ms(item: dict) -> int:
-    return item.get("length_ms") or item.get("duration_ms") or 0
-
-
-def set_text(data: dict) -> str:
-    s, items = data["set"], data["items"]
-    songs = [i for i in items if i["free_text"] is None]
-    total = sum(played_ms(i) for i in songs)
-    lines = [f"SET: {s['name']}", f"{len(songs)} songs · {fmt_ms(total)} total", ""]
-    if s["notes"].strip():
-        lines += ["NOTES", s["notes"].strip(), ""]
-    lines.append("RUNNING ORDER")
-    elapsed, n = 0, 0
-    for it in items:
-        if it["free_text"] is not None:
-            lines.append(f"   — {it['free_text'] or '(note)'} —")
-        else:
-            n += 1
-            name = f"{it['title']} — {it['artists']}" if it["title"] else (it["label"] or "(deleted song)")
-            length = fmt_ms(played_ms(it))
-            if it["length_ms"] and it["duration_ms"] and it["length_ms"] != it["duration_ms"]:
-                length = f"plays {length} of {fmt_ms(it['duration_ms'])}"
-            lines.append(f"{n:>2}. [{fmt_ms(elapsed) if elapsed else '0:00'}] {name} ({length})")
-            elapsed += played_ms(it)
-        if it["cue_time"].strip():
-            lines.append(f"      Cue: {it['cue_time'].strip()}")
-        if it["transition_note"].strip():
-            lines.append(f"      Transition: {it['transition_note'].strip()}")
-    return "\n".join(lines) + "\n"
+    return {"id": setboard.restore(conn, body.snapshot)}
 
 
 @app.get("/api/sets/{set_id}/export")
 def export_set(set_id: int, conn=Depends(get_conn)):
-    return {"text": set_text(get_set(set_id, conn))}
+    return {"text": setboard.set_text(setboard.get_board(conn, set_id))}
 
 
 @app.post("/api/sets/{set_id}/export_file")
 def export_set_file(set_id: int, conn=Depends(get_conn)):
-    data = get_set(set_id, conn)
+    data = setboard.get_board(conn, set_id)
     downloads_dir = Path.home() / "Downloads"
     downloads_dir.mkdir(exist_ok=True)
     dest = library.unique_path(downloads_dir, library.safe_filename(data["set"]["name"], "") or "Set", ".txt")
-    dest.write_text(set_text(data))
+    dest.write_text(setboard.set_text(data))
     tools.reveal(dest)
     return {"path": str(dest)}
+
+
+# ---------------------------------------------------------------- cutting (mixes, samples, song boards)
+
+@app.get("/api/cutting/songs")
+def cutting_songs(q: str = "", connected: bool = False, conn=Depends(get_conn)):
+    return {"songs": cutting.cutting_songs(conn, q, connected)}
+
+
+@app.get("/api/cutting/board/{track_id}")
+def cutting_board(track_id: int, depth: int = 1, conn=Depends(get_conn)):
+    return cutting.board(conn, track_id, depth)
+
+
+class LayoutBody(BaseModel):
+    positions: list[dict]
+
+
+@app.put("/api/cutting/board/{track_id}/layout")
+def cutting_layout(track_id: int, body: LayoutBody, conn=Depends(get_conn)):
+    cutting.save_layout(conn, track_id, body.positions)
+    return {"ok": True}
+
+
+@app.delete("/api/cutting/board/{track_id}/layout")
+def cutting_layout_reset(track_id: int, conn=Depends(get_conn)):
+    cutting.reset_layout(conn, track_id)
+    return {"ok": True}
+
+
+class MixBody(BaseModel):
+    in_ids: list[int]
+    out_ids: list[int]
+    note: str = ""
+
+
+@app.post("/api/mixes")
+def create_mix(body: MixBody, conn=Depends(get_conn)):
+    return cutting.create_mix(conn, body.in_ids, body.out_ids, body.note)
+
+
+class MixPatch(BaseModel):
+    note: str | None = None
+    in_ids: list[int] | None = None
+    out_ids: list[int] | None = None
+
+
+@app.patch("/api/mixes/{mix_id}")
+def update_mix(mix_id: int, body: MixPatch, conn=Depends(get_conn)):
+    return cutting.update_mix(conn, mix_id, body.note, body.in_ids, body.out_ids)
+
+
+@app.delete("/api/mixes/{mix_id}")
+def delete_mix(mix_id: int, conn=Depends(get_conn)):
+    return {"snapshot": cutting.delete_mix(conn, mix_id)}
+
+
+class MixSnapshot(BaseModel):
+    snapshot: dict
+
+
+@app.post("/api/mixes/restore")
+def restore_mix(body: MixSnapshot, conn=Depends(get_conn)):
+    return cutting.restore_mix(conn, body.snapshot)
+
+
+@app.get("/api/mixes/from/{track_id}")
+def mixes_from(track_id: int, conn=Depends(get_conn)):
+    return {"mixes": cutting.mixes_from(conn, track_id)}
+
+
+class SampleBody(BaseModel):
+    sample_track_id: int | None = None
+    text: str = ""
+
+
+@app.post("/api/tracks/{track_id}/samples")
+def add_sample(track_id: int, body: SampleBody, conn=Depends(get_conn)):
+    return cutting.add_sample(conn, track_id, body.sample_track_id, body.text)
+
+
+class SamplePatch(BaseModel):
+    text: str | None = None
+    sample_track_id: int | None = None
+    unlink: bool = False
+
+
+@app.patch("/api/samples/{sample_id}")
+def update_sample(sample_id: int, body: SamplePatch, conn=Depends(get_conn)):
+    link = None if body.unlink else (body.sample_track_id if body.sample_track_id is not None else cutting.UNSET)
+    cutting.update_sample(conn, sample_id, body.text, link)
+    return {"ok": True}
+
+
+@app.get("/api/tracks/{track_id}/samples")
+def get_samples(track_id: int, conn=Depends(get_conn)):
+    return cutting.samples_of(conn, track_id)
+
+
+# ---------------------------------------------------------------- genre rack
+
+def _retag(conn, track_ids) -> dict:
+    """Write each affected downloaded song's MP3 genre tag from the rack."""
+    done, warns = 0, []
+    for tid in dict.fromkeys(track_ids or []):
+        t = db.get_track(conn, tid)
+        if not t or t["download_status"] != "done":
+            continue
+        w = _write_file_tags(conn, t, False, clear_genre=True)
+        if w:
+            warns.append(f"{t['title']}: {w}")
+        else:
+            done += 1
+    return {"retagged": done, "tag_warnings": warns[:5]}
+
+
+def _genre_change(conn, fn) -> dict:
+    """Run a rack edit, keep genre crates in step, then re-tag the songs it touched."""
+    with db.tx(conn):
+        affected = fn()
+        genres.sync_crates(conn)
+    return _retag(conn, affected)
+
+
+@app.get("/api/genres")
+def get_genres(conn=Depends(get_conn)):
+    return {"tree": genres.tree(conn), "unsorted": genres.unsorted_count(conn),
+            "ignored": [r[0] for r in conn.execute("SELECT norm FROM genre_ignored ORDER BY norm")]}
+
+
+class GenreBody(BaseModel):
+    name: str
+    parent_id: int | None = None
+
+
+@app.post("/api/genres")
+def create_genre(body: GenreBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        gid = genres.create(conn, body.name, body.parent_id)
+    return {"id": gid}
+
+
+class GenrePatch(BaseModel):
+    name: str | None = None
+    move: bool = False
+    parent_id: int | None = None
+    index: int | None = None
+
+
+@app.patch("/api/genres/{genre_id}")
+def update_genre(genre_id: int, body: GenrePatch, conn=Depends(get_conn)):
+    def go():
+        affected = []
+        if body.name is not None:
+            affected += genres.rename(conn, genre_id, body.name)
+        if body.move:
+            affected += genres.move(conn, genre_id, body.parent_id, body.index)
+        return affected
+    return _genre_change(conn, go)
+
+
+@app.delete("/api/genres/{genre_id}")
+def delete_genre(genre_id: int, conn=Depends(get_conn)):
+    return _genre_change(conn, lambda: genres.delete(conn, genre_id))
+
+
+class MergeBody(BaseModel):
+    into: int
+
+
+@app.post("/api/genres/{genre_id}/merge")
+def merge_genre(genre_id: int, body: MergeBody, conn=Depends(get_conn)):
+    return _genre_change(conn, lambda: genres.merge(conn, genre_id, body.into))
+
+
+class AliasBody(BaseModel):
+    name: str
+
+
+@app.post("/api/genres/{genre_id}/aliases")
+def add_genre_alias(genre_id: int, body: AliasBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        genres.add_alias(conn, genre_id, body.name)
+    return {"ok": True}
+
+
+@app.delete("/api/genres/aliases/{key}")
+def remove_genre_alias(key: str, conn=Depends(get_conn)):
+    with db.tx(conn):
+        genres.remove_alias(conn, key)
+    return {"ok": True}
+
+
+@app.post("/api/genres/ignore")
+def ignore_genre_name(body: AliasBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        genres.ignore(conn, body.name)
+    return {"ok": True}
+
+
+@app.post("/api/genres/unignore")
+def unignore_genre_name(body: AliasBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        genres.unignore(conn, body.name)
+    return {"ok": True}
+
+
+class TrackGenresBody(BaseModel):
+    genre_ids: list[int]
+
+
+@app.put("/api/tracks/{track_id}/genres")
+def set_track_genres(track_id: int, body: TrackGenresBody, conn=Depends(get_conn)):
+    if not db.get_track(conn, track_id):
+        raise AppError("not_found", "That song doesn't exist anymore.", 404)
+    out = _genre_change(conn, lambda: (genres.set_track_genres(conn, track_id, body.genre_ids), [track_id])[1])
+    return {"track": db.get_track(conn, track_id), **out}
+
+
+class BulkGenreBody(BaseModel):
+    ids: list[int]
+    genre_id: int
+    action: str = "add"
+
+
+@app.post("/api/tracks/genres")
+def bulk_track_genres(body: BulkGenreBody, conn=Depends(get_conn)):
+    if body.action not in ("add", "remove"):
+        raise AppError("bad_field", "Unknown action.")
+    fn = genres.add_to_tracks if body.action == "add" else genres.remove_from_tracks
+    out = _genre_change(conn, lambda: fn(conn, body.ids, body.genre_id))
+    return {"changed": out["retagged"], **out}
+
+
+@app.get("/api/genre_artists")
+def genre_artists(view: str = "genre:none", sub: int = 1, conn=Depends(get_conn)):
+    """Artists of the songs in a rack view, with how many songs each has. Derived, never set."""
+    tracks = list_tracks(view=view, sub=sub, conn=conn)["tracks"]
+    counts: dict[str, list] = {}
+    for t in tracks:
+        for a in genres.split_artists(t["artists"]):
+            entry = counts.setdefault(genres.norm(a), [a, 0])
+            entry[1] += 1
+    ranked = sorted(counts.values(), key=lambda e: (-e[1], e[0].lower()))
+    return {"artists": [{"name": n, "count": c} for n, c in ranked], "songs": len(tracks)}
+
+
+class LookupBody(BaseModel):
+    on: bool
+
+
+@app.put("/api/genres/lookup")
+def set_genre_lookup(body: LookupBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        db.set_setting(conn, "genre_lookup_on", "1" if body.on else "0")
+    return genre_lookup.status(conn, genre_finder)
+
+
+@app.get("/api/genres/musicbrainz")
+def musicbrainz_genres(q: str = "", conn=Depends(get_conn)):
+    """MusicBrainz's genre names, to browse and add to your rack. Reference only: nothing is tagged by it."""
+    if not q.strip():
+        return {"mode": "needed", "genres": genres.needed_from_musicbrainz(conn)}
+    names, at, error = genre_lookup.genre_list(conn)
+    key = genres.norm(q)
+    shown = [n for n in names if key in genres.norm(n)]
+    in_rack = {n: genres.resolve(conn, n) for n in shown[:150]}
+    return {"mode": "search", "total": len(names), "matches": len(shown), "fetched_at": at, "error": error,
+            "genres": [{"name": n, "genre_id": in_rack[n]} for n in shown[:150]]}
+
+
+@app.get("/api/genres/incoming")
+def incoming_genres(conn=Depends(get_conn)):
+    """Every genre name found in Rekordbox or your MP3s, and whether the rack knows it."""
+    found: dict[str, dict] = {}
+    for r in conn.execute("SELECT t.id, t.rekordbox_genre, t.file_genre, "
+                          "NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id) AS unsorted FROM tracks t"):
+        for source, text in (("Rekordbox", r["rekordbox_genre"]), ("MP3", r["file_genre"])):
+            for part in genres.split_names(text):
+                e = found.setdefault(genres.norm(part), {"name": part, "songs": set(), "unsorted": set(), "sources": set()})
+                e["songs"].add(r["id"])
+                e["sources"].add(source)
+                if r["unsorted"]:
+                    e["unsorted"].add(r["id"])
+    items = []
+    for e in found.values():
+        gid = genres.resolve(conn, e["name"])
+        items.append({"name": e["name"], "songs": len(e["songs"]), "unsorted": len(e["unsorted"]),
+                      "sources": sorted(e["sources"]), "ignored": genres.is_ignored(conn, e["name"]),
+                      "genre_id": gid, "path": genres.path(conn, gid) if gid else None})
+    items.sort(key=lambda i: (-i["songs"], i["name"].lower()))
+    return {"items": items}
+
+
+@app.post("/api/genres/incoming/apply")
+def apply_incoming_genres(conn=Depends(get_conn)):
+    """Give songs that have no genre the rack genres their Rekordbox/MP3 genre names resolve to."""
+    changed = []
+    with db.tx(conn):
+        for r in conn.execute("SELECT t.id, t.rekordbox_genre, t.file_genre FROM tracks t "
+                              "WHERE NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id)").fetchall():
+            ids: list[int] = []
+            for text in (r["rekordbox_genre"], r["file_genre"]):
+                for part in genres.split_names(text):
+                    gid = genres.resolve(conn, part)
+                    if gid is not None and gid not in ids:
+                        ids.append(gid)
+            # "House / Deep House" shouldn't tag the song with both: keep only the most specific
+            ids = [g for g in ids if not any(g != o and g in genres.ancestors(conn, o) for o in ids)]
+            if ids:
+                genres.set_track_genres(conn, r["id"], ids)
+                changed.append(r["id"])
+        genres.sync_crates(conn)
+    return {"assigned": len(changed), **_retag(conn, changed)}
+
+
+class GenreCrateBody(BaseModel):
+    parent_id: int | None = None
+
+
+@app.post("/api/genres/{genre_id}/crate")
+def make_genre_crate(genre_id: int, body: GenreCrateBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        cid = genres.make_crate(conn, genre_id, body.parent_id)
+    return {"crate_id": cid}
+
+
+@app.post("/api/crates/{crate_id}/unfollow")
+def unfollow_genre(crate_id: int, conn=Depends(get_conn)):
+    """The crate stops following its genre and keeps its songs as a normal crate."""
+    with db.tx(conn):
+        conn.execute("UPDATE crates SET genre_id = NULL WHERE id = ?", (crate_id,))
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- rekordbox (BPM & key in, playlists out)
+
+class XmlBody(BaseModel):
+    path: str
+
+
+class ExportBody(BaseModel):
+    on: bool
+
+
+@app.put("/api/rekordbox/xml")
+def rekordbox_set_xml(body: XmlBody, conn=Depends(get_conn)):
+    p = Path(body.path).expanduser()
+    if not p.is_file():
+        raise AppError("not_found", "That file doesn't exist.", 400)
+    try:
+        rekordbox._read_xml(p)
+    except Exception:
+        raise AppError("bad_xml", "That doesn't look like a Rekordbox XML export (File → Export Collection in xml format).", 400)
+    db.set_setting(conn, "rekordbox_xml", str(p))
+    rekordbox.run_import(conn)
+    return rekordbox.status(conn)
+
+
+@app.post("/api/rekordbox/import")
+def rekordbox_import(conn=Depends(get_conn)):
+    if not db.get_setting(conn, "rekordbox_xml"):
+        raise AppError("no_xml", "Choose your Rekordbox XML file first.", 400)
+    rekordbox.run_import(conn)
+    return rekordbox.status(conn)
+
+
+@app.delete("/api/rekordbox/xml")
+def rekordbox_forget_xml(conn=Depends(get_conn)):
+    with db.tx(conn):
+        conn.execute("DELETE FROM settings WHERE key IN ('rekordbox_xml', 'rekordbox_xml_mtime', 'rekordbox_import')")
+    return rekordbox.status(conn)
+
+
+@app.put("/api/rekordbox/export")
+def rekordbox_export(body: ExportBody, conn=Depends(get_conn)):
+    db.set_setting(conn, "rekordbox_export_on", "1" if body.on else "0")
+    if body.on:
+        rekordbox.write_export(state, conn)
+    return rekordbox.status(conn)
+
+
+@app.post("/api/rekordbox/export/reveal")
+def rekordbox_export_reveal(conn=Depends(get_conn)):
+    p = rekordbox.export_path()
+    if not p.exists():
+        rekordbox.write_export(state, conn)
+    tools.reveal(p)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- genius (sample lookup)
+
+@app.get("/api/tracks/{track_id}/genius")
+def genius_suggestions(track_id: int, refresh: bool = False, genius_id: int | None = None, conn=Depends(get_conn)):
+    owner = _owner(conn)
+    return genius.suggestions(conn, lambda: genius.Client(genius.load_token(owner)), track_id,
+                              refresh=refresh, genius_id=genius_id)
+
+
+class GeniusApplyBody(BaseModel):
+    items: list[dict]
+
+
+@app.post("/api/tracks/{track_id}/genius/apply")
+def genius_apply(track_id: int, body: GeniusApplyBody, conn=Depends(get_conn)):
+    return {"added": genius.apply(conn, track_id, body.items), **cutting.samples_of(conn, track_id)}
+
+
+class TokenBody(BaseModel):
+    token: str
+
+
+@app.put("/api/genius/token")
+def genius_token(body: TokenBody, conn=Depends(get_conn)):
+    token = body.token.strip()
+    if not token:
+        raise AppError("bad_token", "Paste the access token from your Genius API client.")
+    genius.check_token(token)
+    genius.save_token(_owner(conn), token)
+    return {"ok": True}
+
+
+@app.delete("/api/genius/token")
+def genius_logout(conn=Depends(get_conn)):
+    genius.clear_token(_owner(conn))
+    return {"ok": True}
+
+
+@app.delete("/api/samples/{sample_id}")
+def delete_sample(sample_id: int, conn=Depends(get_conn)):
+    cutting.delete_sample(conn, sample_id)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- settings & tools
@@ -1015,9 +1501,13 @@ def get_settings(conn=Depends(get_conn)):
         "cookies_browser": db.get_setting(conn, "cookies_browser", ""),
         "cookie_browsers": list(COOKIE_BROWSERS),
         "library_path": str(state.library),
+        "library_name": db.get_setting(conn, "library_name") or state.library.name,
+        "ask_on_launch": libraries.ask_on_launch(),
         "log_dir": str(LOG_DIR),
         "ffmpeg": tools.ffmpeg_dir(),
         "ytdlp": tools.ytdlp_version(),
+        "search_ahead": _search_ahead_setting(conn),
+        "search_ahead_max": yt_search.AHEAD_MAX,
         "js_runtime": tools.js_runtime(),
         "js_runtime_path": tools.which(tools.js_runtime()) if tools.js_runtime() else None,
         "backups": backup.list_backups(state),
@@ -1025,6 +1515,8 @@ def get_settings(conn=Depends(get_conn)):
 
 
 class SettingsPatch(BaseModel):
+    library_name: str | None = None
+    search_ahead: int | None = None
     spotify_client_id: str | None = None
     cookies_browser: str | None = None
     port: int | None = None
@@ -1034,6 +1526,15 @@ class SettingsPatch(BaseModel):
 def patch_settings(body: SettingsPatch, conn=Depends(get_conn)):
     notes = []
     with db.tx(conn):
+        if body.search_ahead is not None:
+            if not 0 <= body.search_ahead <= yt_search.AHEAD_MAX:
+                raise AppError("too_many", f"{yt_search.AHEAD_MAX} max: searching further ahead makes YouTube rate-limit you "
+                               "(it can block downloads too).")
+            db.set_setting(conn, "search_ahead", str(body.search_ahead))
+        if body.library_name is not None:
+            if not body.library_name.strip():
+                raise AppError("bad_name", "Give the library a name.")
+            db.set_setting(conn, "library_name", body.library_name.strip())
         if body.spotify_client_id is not None:
             cid = body.spotify_client_id.strip()
             if cid and not cid.isalnum():
@@ -1114,6 +1615,17 @@ def backup_now():
 class RevealBody(BaseModel):
     track_id: int | None = None
     target: str | None = None  # "library" | "logs"
+
+
+class PickBody(BaseModel):
+    kind: str = "file"  # "file" | "folder"
+    extensions: list[str] = []
+
+
+@app.post("/api/pick")
+def pick(body: PickBody):
+    """Finder picker for browser mode (the app window uses pywebview's own)."""
+    return {"path": tools.pick_path(body.kind, tuple(e for e in body.extensions if e.isalnum()))}
 
 
 @app.post("/api/reveal")

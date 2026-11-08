@@ -14,10 +14,10 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from . import backup, db
-from .config import update_config
 from .errors import AppError
 
 log = logging.getLogger("djcrate.state")
@@ -106,7 +106,6 @@ class AppState:
             self.read_only = read_only
             self.lock_info = None
             self.error = ""
-            update_config(library_path=str(path))
             if not path.is_dir():
                 self.status = "library_missing"
                 return
@@ -152,13 +151,44 @@ class AppState:
             if not read_only:
                 self._write_lock()
                 self._recover_interrupted()
+                self._ensure_library_id()
             self.status = "ok"
+            from .libraries import remember
+            remember(path)
             log.info("Opened library %s (read_only=%s)", path, read_only)
         for cb in self.on_opened:
             try:
                 cb()
             except Exception:
                 log.exception("on_opened callback failed")
+
+    def close(self) -> None:
+        """Back to the library picker (switching libraries)."""
+        with self._lock:
+            self.release_lock()
+            self.status = "choose_library"
+            self.read_only = False
+            self.lock_info = None
+            self.error = ""
+            self.interrupted_jobs = 0
+
+    def _ensure_library_id(self) -> None:
+        """A stable id per library, used to keep Spotify logins separate."""
+        conn = db.connect(self.db_path)
+        try:
+            if not db.get_setting(conn, "library_id"):
+                db.set_setting(conn, "library_id", uuid.uuid4().hex)
+        finally:
+            conn.close()
+
+    def library_id(self) -> str | None:
+        if self.status != "ok":
+            return None
+        conn = db.connect(self.db_path)
+        try:
+            return db.get_setting(conn, "library_id")
+        finally:
+            conn.close()
 
     def _foreign_lock(self) -> dict | None:
         try:

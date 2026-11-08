@@ -15,7 +15,7 @@ log = logging.getLogger("djcrate.db")
 
 LENGTH_TOLERANCE_MS = 5000
 
-MIGRATIONS: list[str] = [
+MIGRATIONS: list = [  # each entry: SQL text, or a function(conn) for conversions
     # v1
     """
     CREATE TABLE tracks (
@@ -115,22 +115,197 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE set_items ADD COLUMN length_ms INTEGER
     """,
+    # v3: prep flags simplified — Cleaned/Verified become one "Ready" flag (from
+    # Verified), plus "Broken" for songs that need fixing.
+    """
+    ALTER TABLE tracks RENAME COLUMN verified TO ready;
+    ALTER TABLE tracks DROP COLUMN cleaned;
+    ALTER TABLE tracks ADD COLUMN broken INTEGER NOT NULL DEFAULT 0
+    """,
 ]
+
+V4_SQL = """
+CREATE TABLE mixes (
+    id         INTEGER PRIMARY KEY,
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE mix_songs (
+    mix_id   INTEGER NOT NULL REFERENCES mixes(id) ON DELETE CASCADE,
+    track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+    label    TEXT NOT NULL DEFAULT '',
+    side     TEXT NOT NULL CHECK (side IN ('in', 'out')),
+    position INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_mix_songs_track ON mix_songs(track_id);
+CREATE INDEX idx_mix_songs_mix ON mix_songs(mix_id);
+CREATE TABLE samples (
+    id              INTEGER PRIMARY KEY,
+    track_id        INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    sample_track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+    sample_label    TEXT NOT NULL DEFAULT '',
+    text            TEXT NOT NULL DEFAULT '',
+    position        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_samples_track ON samples(track_id);
+CREATE INDEX idx_samples_sample ON samples(sample_track_id);
+CREATE TABLE board_layout (
+    board_track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    node_kind      TEXT NOT NULL CHECK (node_kind IN ('song', 'mix')),
+    node_id        INTEGER NOT NULL,
+    x              REAL NOT NULL,
+    y              REAL NOT NULL,
+    PRIMARY KEY (board_track_id, node_kind, node_id)
+);
+CREATE TABLE set_nodes (
+    id          INTEGER PRIMARY KEY,
+    set_id      INTEGER NOT NULL REFERENCES sets(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('song', 'mix', 'text')),
+    track_id    INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+    mix_id      INTEGER REFERENCES mixes(id) ON DELETE SET NULL,
+    text        TEXT NOT NULL DEFAULT '',
+    label       TEXT NOT NULL DEFAULT '',
+    cue_time    TEXT NOT NULL DEFAULT '',
+    length_ms   INTEGER,
+    x           REAL NOT NULL DEFAULT 0,
+    y           REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_set_nodes_set ON set_nodes(set_id);
+CREATE TABLE set_edges (
+    id        INTEGER PRIMARY KEY,
+    set_id    INTEGER NOT NULL REFERENCES sets(id) ON DELETE CASCADE,
+    from_node INTEGER NOT NULL REFERENCES set_nodes(id) ON DELETE CASCADE,
+    to_node   INTEGER NOT NULL REFERENCES set_nodes(id) ON DELETE CASCADE,
+    main      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_set_edges_set ON set_edges(set_id);
+CREATE TABLE yt_search_cache (
+    track_id     INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    query        TEXT NOT NULL,
+    results_json TEXT NOT NULL,
+    fetched_at   REAL NOT NULL
+)
+"""
+
+SET_X_SONG, SET_X_GAP = 300, 280
+
+
+def _v4_boards(conn) -> None:
+    """Mix graph, samples, boards, search cache — and turn every existing set's
+    list into a board whose main path is the old order."""
+    for stmt in _statements(V4_SQL):
+        conn.execute(stmt)
+    for (set_id,) in conn.execute("SELECT id FROM sets").fetchall():
+        items = conn.execute("SELECT * FROM set_items WHERE set_id = ? ORDER BY position", (set_id,)).fetchall()
+        x, prev = 0.0, None
+
+        def add(kind, **f):
+            nonlocal x, prev
+            cur = conn.execute(
+                "INSERT INTO set_nodes (set_id, kind, track_id, text, label, cue_time, length_ms, x, y) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                (set_id, kind, f.get("track_id"), f.get("text", ""), f.get("label", ""), f.get("cue_time", ""), f.get("length_ms"), x),
+            )
+            if prev is not None:
+                conn.execute("INSERT INTO set_edges (set_id, from_node, to_node, main) VALUES (?, ?, ?, 1)", (set_id, prev, cur.lastrowid))
+            prev = cur.lastrowid
+            x += SET_X_SONG if kind != "mix" else SET_X_GAP
+
+        for it in items:
+            if it["free_text"] is not None:
+                add("text", text=it["free_text"], cue_time=it["cue_time"])
+            else:
+                add("song", track_id=it["track_id"], label=it["label"], cue_time=it["cue_time"], length_ms=it["length_ms"])
+            if (it["transition_note"] or "").strip():
+                add("mix", text=it["transition_note"].strip())
+
+
+MIGRATIONS.append(_v4_boards)  # v4
+
+MIGRATIONS.append(  # v5: sample lookup (Genius)
+    """
+    ALTER TABLE samples ADD COLUMN url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE samples ADD COLUMN relation TEXT NOT NULL DEFAULT 'sample';
+    CREATE TABLE genius_cache (
+        track_id   INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        genius_id  INTEGER,
+        match_json TEXT NOT NULL,
+        song_json  TEXT,
+        fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """
+)
+
+MIGRATIONS.append(  # v6: "sampled in" songs you don't have, kept as text on the sampled song
+    "ALTER TABLE samples ADD COLUMN direction TEXT NOT NULL DEFAULT 'out';"
+)
+
+MIGRATIONS.append(  # v7: BPM and key, read from a Rekordbox XML export
+    """
+    ALTER TABLE tracks ADD COLUMN bpm REAL;
+    ALTER TABLE tracks ADD COLUMN musical_key TEXT
+    """
+)
+
+MIGRATIONS.append(  # v8: Genre Rack (your own genre vocabulary), live genre crates, genre suggestions
+    """
+    CREATE TABLE genres (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        norm       TEXT NOT NULL UNIQUE,
+        parent_id  INTEGER REFERENCES genres(id),
+        position   INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE genre_aliases (
+        norm     TEXT PRIMARY KEY,
+        genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE
+    );
+    CREATE TABLE genre_ignored (norm TEXT PRIMARY KEY);
+    CREATE TABLE track_genres (
+        track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (track_id, genre_id)
+    );
+    CREATE INDEX idx_track_genres_genre ON track_genres(genre_id);
+    ALTER TABLE tracks ADD COLUMN rekordbox_genre TEXT;
+    ALTER TABLE tracks ADD COLUMN file_genre TEXT;
+    ALTER TABLE crates ADD COLUMN genre_id INTEGER REFERENCES genres(id) ON DELETE SET NULL;
+    CREATE TABLE genre_suggest (
+        track_id   INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        items_json TEXT NOT NULL,
+        status     TEXT NOT NULL,
+        fetched_at REAL NOT NULL
+    );
+    CREATE TABLE mb_artist_genres (
+        mbid        TEXT PRIMARY KEY,
+        genres_json TEXT NOT NULL,
+        fetched_at  REAL NOT NULL
+    )
+    """
+)
+
+MIGRATIONS.append(  # v9: the Edited / Ready / Broken flags are gone
+    """
+    ALTER TABLE tracks DROP COLUMN edited;
+    ALTER TABLE tracks DROP COLUMN ready;
+    ALTER TABLE tracks DROP COLUMN broken
+    """
+)
 
 SCHEMA_VERSION = len(MIGRATIONS)
 
 CHECK_VERSION_SQL = (
-    "(t.download_status = 'done' AND t.edited = 0 AND t.duration_ms IS NOT NULL "
+    "(t.download_status = 'done' AND t.duration_ms IS NOT NULL "
     f"AND t.file_duration_ms IS NOT NULL AND abs(t.file_duration_ms - t.duration_ms) > {LENGTH_TOLERANCE_MS})"
 )
 
 SMART_CRATES: dict[str, tuple[str, str]] = {
     "all": ("All Tracks", "1"),
     "needs_link": ("Needs Link", "(coalesce(t.source_url, '') = '' AND t.download_status NOT IN ('done', 'missing'))"),
-    "ready": ("Ready to Download", "(coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error'))"),
+    "to_download": ("Ready to Download", "(coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error'))"),
     "downloaded": ("Downloaded", "t.download_status = 'done'"),
-    "cleaned": ("Cleaned", "t.cleaned = 1"),
-    "verified": ("Verified", "t.verified = 1"),
     "check_version": ("Check Version", CHECK_VERSION_SQL),
     "missing": ("Missing Files", "t.download_status = 'missing'"),
 }
@@ -181,13 +356,20 @@ def migrate(conn: sqlite3.Connection, backup_fn=None) -> None:
         backup_fn(version)
     for target in range(version + 1, SCHEMA_VERSION + 1):
         log.info("Migrating database to v%d", target)
+        step = MIGRATIONS[target - 1]
         # executescript() commits implicitly, so run statements one by one in a real transaction.
-        statements = [s.strip() for s in MIGRATIONS[target - 1].split(";") if s.strip()]
         with tx(conn):
-            for stmt in statements:
-                conn.execute(stmt)
+            if callable(step):
+                step(conn)
+            else:
+                for stmt in _statements(step):
+                    conn.execute(stmt)
             conn.execute("DELETE FROM schema_version")
             conn.execute("INSERT INTO schema_version (version) VALUES (?)", (target,))
+
+
+def _statements(sql: str) -> list[str]:
+    return [s.strip() for s in sql.split(";") if s.strip()]
 
 
 def integrity_ok(conn: sqlite3.Connection) -> bool:
@@ -286,10 +468,10 @@ def upsert_track(conn, meta: dict) -> tuple[int, bool]:
 
 def track_to_dict(row) -> dict:
     d = dict(row)
-    for flag in ("edited", "cleaned", "verified", "is_manual"):
+    for flag in ("is_manual",):
         d[flag] = bool(d.get(flag))
     d["check_version"] = bool(
-        d["download_status"] == "done" and not d["edited"] and d["duration_ms"] and d["file_duration_ms"]
+        d["download_status"] == "done" and d["duration_ms"] and d["file_duration_ms"]
         and abs(d["file_duration_ms"] - d["duration_ms"]) > LENGTH_TOLERANCE_MS
     )
     if "removed_from_source" in d:
@@ -299,7 +481,12 @@ def track_to_dict(row) -> dict:
 
 def get_track(conn, track_id: int):
     row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
-    return track_to_dict(row) if row else None
+    if not row:
+        return None
+    from . import genres
+    t = track_to_dict(row)
+    genres.attach(conn, [t])
+    return t
 
 
 def add_to_crate(conn, crate_id: int, track_ids) -> int:

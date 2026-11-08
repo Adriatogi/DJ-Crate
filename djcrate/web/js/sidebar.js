@@ -5,7 +5,7 @@ import { emit, findCrate, store } from "./store.js";
 import { confirmDialog, errorToast, h, menu, promptDialog, toast } from "./ui.js";
 
 const SMART_ICONS = {
-  all: "◉", needs_link: "🔗", ready: "⬇", downloaded: "✓", cleaned: "🟡", verified: "🟢", check_version: "⚠", missing: "!",
+  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!",
 };
 
 const collapsed = new Set(JSON.parse(localStorage.getItem("djc.collapsed") || "[]"));
@@ -33,7 +33,7 @@ export function renderSidebar() {
 function statsLine(c) {
   const s = c.stats;
   if (!s.total) return "empty";
-  return `${s.downloaded}/${s.total} ↓ · ${s.cleaned} cleaned · ${s.verified} verified`;
+  return `${s.downloaded}/${s.total} ↓`;
 }
 
 function renderNode(c) {
@@ -56,7 +56,7 @@ function renderNode(c) {
         renderSidebar();
       },
     }, isFolder ? (isCollapsed ? "▶" : "▼") : ""),
-    h("span", { class: "icon" }, icon),
+    h("span", { class: "icon" }, c.genre_id ? h("span", { title: "Follows a genre — it fills itself" }, "🏷") : icon),
     h("div", { class: "name" },
       h("div", { class: "name" }, c.name),
       h("div", { class: "stats" }, statsLine(c))),
@@ -80,6 +80,14 @@ export function crateMenu(anchor, c) {
     items.push({ label: "New folder inside…", fn: () => newCrate("folder", c.id) });
   }
   if (c.kind === "spotify") items.push({ label: "↻ Re-sync from Spotify", fn: () => emit("resync", c.id) });
+  if (c.genre_id) {
+    items.push({ label: "Show in Genre Rack", fn: () => emit("rack-show", c.genre_id) });
+    items.push({ label: "Stop following the genre", fn: async () => {
+      await post(`/api/crates/${c.id}/unfollow`);
+      emit("refresh-sidebar");
+      toast(`“${c.name}” is a normal crate now. It keeps its songs.`, { type: "success" });
+    } });
+  }
   items.push("-", { label: c.kind === "folder" ? "Delete folder…" : "Delete crate…", danger: true, fn: () => deleteCrate(c) });
   menu(anchor, items);
 }

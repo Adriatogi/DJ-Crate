@@ -52,48 +52,60 @@ def redirect_uri(port: int) -> str:
 
 # ---------------------------------------------------------------- tokens
 
-def _key(client_id: str) -> str:
-    return f"spotify:{client_id}"
+def _key(client_id: str, owner: str | None) -> str:
+    # Keyed per library too, so two people sharing a Mac (and maybe a Spotify
+    # developer app) each stay logged in to their own account.
+    return f"spotify:{client_id}:{owner}" if owner else f"spotify:{client_id}"
 
 
-def load_tokens(client_id: str) -> dict | None:
+def load_tokens(client_id: str, owner: str | None = None) -> dict | None:
     if not client_id:
         return None
     try:
-        raw = keyring.get_password(APP_NAME, _key(client_id))
+        raw = keyring.get_password(APP_NAME, _key(client_id, owner))
+        if not raw and owner:
+            # Logins saved before libraries had their own key: adopt them once.
+            raw = keyring.get_password(APP_NAME, _key(client_id, None))
+            if raw:
+                keyring.set_password(APP_NAME, _key(client_id, owner), raw)
+                _delete(_key(client_id, None))
     except keyring.errors.KeyringError:
         log.exception("Keychain read failed")
         return None
     return json.loads(raw) if raw else None
 
 
-def save_tokens(client_id: str, tokens: dict) -> None:
-    keyring.set_password(APP_NAME, _key(client_id), json.dumps(tokens))
+def save_tokens(client_id: str, tokens: dict, owner: str | None = None) -> None:
+    keyring.set_password(APP_NAME, _key(client_id, owner), json.dumps(tokens))
 
 
-def clear_tokens(client_id: str) -> None:
-    _me_cache.clear()
+def _delete(key: str) -> None:
     try:
-        keyring.delete_password(APP_NAME, _key(client_id))
+        keyring.delete_password(APP_NAME, key)
     except keyring.errors.PasswordDeleteError:
         pass
     except keyring.errors.KeyringError:
         log.exception("Keychain delete failed")
 
 
-def _store_token_response(client_id: str, data: dict, old: dict | None = None) -> dict:
+def clear_tokens(client_id: str, owner: str | None = None) -> None:
+    _me_cache.clear()
+    _delete(_key(client_id, owner))
+
+
+def _store_token_response(client_id: str, data: dict, old: dict | None = None, owner: str | None = None) -> dict:
     tokens = {
         "access_token": data["access_token"],
         "refresh_token": data.get("refresh_token") or (old or {}).get("refresh_token"),
         "expires_at": time.time() + int(data.get("expires_in", 3600)),
     }
-    save_tokens(client_id, tokens)
+    save_tokens(client_id, tokens, owner)
     return tokens
 
 
 # ---------------------------------------------------------------- login (PKCE)
 
-def start_login(client_id: str, port: int) -> str:
+def start_login(client_id: str, port: int, owner: str | None = None) -> str:
     if not client_id:
         raise SpotifyError("no_client_id", "Add your Spotify Client ID in Settings first.")
     verifier = secrets.token_urlsafe(64)[:128]
@@ -101,7 +113,7 @@ def start_login(client_id: str, port: int) -> str:
     state = secrets.token_urlsafe(16)
     with _lock:
         _pending.clear()
-        _pending[state] = {"verifier": verifier, "client_id": client_id, "port": port, "created": time.time()}
+        _pending[state] = {"verifier": verifier, "client_id": client_id, "port": port, "owner": owner, "created": time.time()}
         login_result.clear()
         login_result.update(state="waiting", started=time.time())
     return AUTH_URL + "?" + urlencode({
@@ -162,7 +174,7 @@ def finish_login(code: str | None, state: str | None, error: str | None) -> tupl
             msg = f"Spotify login failed: {desc}"
         login_result.update(state="error", message=msg)
         return False, msg
-    _store_token_response(pending["client_id"], r.json())
+    _store_token_response(pending["client_id"], r.json(), owner=pending.get("owner"))
     _me_cache.clear()
     login_result.update(state="ok", message="Connected to Spotify.")
     return True, "Connected! You can close this tab and go back to DJ Crate."
@@ -179,11 +191,12 @@ def _json(r: httpx.Response) -> dict:
 # ---------------------------------------------------------------- API client
 
 class Client:
-    def __init__(self, client_id: str):
+    def __init__(self, client_id: str, owner: str | None = None):
         if not client_id:
             raise SpotifyError("no_client_id", "Add your Spotify Client ID in Settings first.")
         self.client_id = client_id
-        self.tokens = load_tokens(client_id)
+        self.owner = owner
+        self.tokens = load_tokens(client_id, owner)
         if not self.tokens:
             raise SpotifyError("not_logged_in", "Log in to Spotify first.", 401)
         self.http = httpx.Client(timeout=20)
@@ -208,11 +221,11 @@ class Client:
             raise SpotifyError("offline", "Can't reach Spotify — check your internet connection.", 503)
         if r.status_code in (400, 401):
             log.warning("Spotify refresh rejected: %s", r.text[:200])
-            clear_tokens(self.client_id)
+            clear_tokens(self.client_id, self.owner)
             raise SpotifyError("revoked", "You've been logged out of Spotify. Log in again — your crates are safe.", 401)
         if r.status_code != 200:
             raise SpotifyError("spotify_down", f"Spotify had a problem ({r.status_code}). Try again shortly.", 502)
-        self.tokens = _store_token_response(self.client_id, r.json(), self.tokens)
+        self.tokens = _store_token_response(self.client_id, r.json(), self.tokens, self.owner)
 
     def get(self, path: str, params: dict | None = None) -> dict:
         url = path if path.startswith("http") else API + path
@@ -235,7 +248,7 @@ class Client:
                 refreshed = True
                 continue
             if r.status_code == 401:
-                clear_tokens(self.client_id)
+                clear_tokens(self.client_id, self.owner)
                 raise SpotifyError("revoked", "You've been logged out of Spotify. Log in again — your crates are safe.", 401)
             if r.status_code == 429:
                 wait = min(int(r.headers.get("Retry-After", "5") or 5), 60)

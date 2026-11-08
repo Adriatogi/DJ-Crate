@@ -132,3 +132,14 @@ def test_status_shows_disconnected_without_tokens(client, lib):
     db.set_setting(conn, "spotify_client_id", "zzz999")
     s = client.get("/api/status").json()["spotify"]
     assert s["client_id_set"] and not s["connected"]
+
+
+def test_logins_are_separate_per_library_and_old_login_is_adopted():
+    spotify.save_tokens(CID, {"access_token": "legacy", "refresh_token": "r", "expires_at": 0})  # pre-library key
+    assert spotify.load_tokens(CID, "libA")["access_token"] == "legacy"   # first library adopts it
+    assert spotify.load_tokens(CID, "libB") is None                       # a second person isn't logged in as you
+    spotify.save_tokens(CID, {"access_token": "b", "refresh_token": "r", "expires_at": 0}, "libB")
+    assert spotify.load_tokens(CID, "libA")["access_token"] == "legacy"
+    assert spotify.load_tokens(CID, "libB")["access_token"] == "b"
+    spotify.clear_tokens(CID, "libB")
+    assert spotify.load_tokens(CID, "libB") is None and spotify.load_tokens(CID, "libA") is not None

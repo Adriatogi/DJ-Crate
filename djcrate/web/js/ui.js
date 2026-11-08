@@ -34,6 +34,26 @@ export function fmtMs(ms) {
   return hh ? `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}` : `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
+const CAMELOT_NAMES = {
+  "1A": "Abm", "2A": "Ebm", "3A": "Bbm", "4A": "Fm", "5A": "Cm", "6A": "Gm", "7A": "Dm", "8A": "Am", "9A": "Em", "10A": "Bm", "11A": "F#m", "12A": "Dbm",
+  "1B": "B", "2B": "F#", "3B": "Db", "4B": "Ab", "5B": "Eb", "6B": "Bb", "7B": "F", "8B": "C", "9B": "G", "10B": "D", "11B": "A", "12B": "E",
+};
+
+export function fmtBpm(bpm) {
+  if (!bpm) return "—";
+  return Number.isInteger(bpm) ? String(bpm) : bpm.toFixed(1).replace(/\.0$/, "");
+}
+
+/** "8A · Am" from a stored Camelot code. */
+export function fmtKey(code) {
+  return code && CAMELOT_NAMES[code] ? `${code} · ${CAMELOT_NAMES[code]}` : "—";
+}
+
+/** Sort value: Camelot number, then letter, so compatible keys sit together. */
+export function keyOrder(code) {
+  return code ? parseInt(code, 10) * 2 + (code.endsWith("B") ? 1 : 0) : 0;
+}
+
 export function fmtDiff(ms) {
   if (ms === null || ms === undefined) return "";
   const s = Math.round(ms / 1000);

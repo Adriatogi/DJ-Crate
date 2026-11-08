@@ -4,10 +4,13 @@
 import { get, native, post } from "./api.js";
 import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
 import { closeDetail } from "./detail.js";
+import { showCutting } from "./cutting.js";
+import { showDocs } from "./docs.js";
+import { initRack, leaveRack, showRack } from "./rack.js";
 import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
-import { closePlayer, playerOpen, togglePlayPause } from "./tracks.js";
+import { closePlayer, playerOpen, resetTable, togglePlayPause } from "./tracks.js";
 import { copyText, errorToast, fill, h, toast } from "./ui.js";
 
 let tab = "crates";
@@ -17,16 +20,27 @@ let interruptedPrompted = false;
 let lastQueueKey = "";
 let activityTimer = null;
 let everConnected = false;
+let openedPath = null;
+let searchPaused = false;
+let lastRekordboxAt;
+let lastLookedUp;
+let lastGenreRefresh = 0;
+let pendingTrackRefresh = false;
 
 // ------------------------------------------------ tabs
 
 function showTab(name) {
+  if (tab === "rack" && name !== "rack") leaveRack(); // hands the song table back to Crates
   tab = name;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   if (name === "sets") showSets();
+  if (name === "cutting") showCutting();
+  if (name === "rack") showRack();
+  if (name === "docs") showDocs();
   if (name === "settings") showSettings();
   if (name !== "crates") closePlayer();
+  if (name === "crates" && pendingTrackRefresh) { pendingTrackRefresh = false; refreshTracks(); }
 }
 
 // ------------------------------------------------ status polling
@@ -50,6 +64,16 @@ async function poll() {
     lastLibraryStatus = libStatus;
     if (libStatus === "ok") {
       hideOverlay();
+      if (openedPath && openedPath !== s.library.path) {
+        // Switched to another library: nothing from the old one should linger.
+        resetTable();
+        store.tracks = [];
+        store.view = "smart:all";
+        interruptedPrompted = false;
+        everConnected = false;
+        if (tab !== "crates") showTab(tab);
+      }
+      openedPath = s.library.path;
       await refreshSidebar();
       selectView(store.view);
     } else {
@@ -65,10 +89,28 @@ async function poll() {
     const key = `${q.queued}|${q.running}|${q.failed}|${q.interrupted}`;
     // While downloads run, keep the table + counts live.
     if (q.queued || q.running || key !== lastQueueKey) {
-      if (tab === "crates") refreshTracks();
+      if (tab === "crates" || tab === "rack") refreshTracks();
       if (key !== lastQueueKey) refreshSidebar();
     }
     lastQueueKey = key;
+    // Rekordbox re-export picked up by the watcher: refresh BPM & key.
+    const rb = s.rekordbox;
+    if (rb && lastRekordboxAt !== undefined && rb.at && rb.at !== lastRekordboxAt) {
+      if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
+      if (tab === "settings") showSettings();
+      toast(rb.error || `Updated BPM & key for ${rb.matched} songs from Rekordbox`, { type: rb.error ? "warn" : "success" });
+    }
+    lastRekordboxAt = rb?.at ?? null;
+    // Background genre suggestions arriving: refresh the table now and then (never while you're typing in it).
+    const gl = s.genres;
+    if (gl) {
+      if (lastLookedUp === undefined) lastLookedUp = gl.looked_up;
+      else if (gl.looked_up !== lastLookedUp && Date.now() - lastGenreRefresh > 30000) {
+        lastLookedUp = gl.looked_up;
+        lastGenreRefresh = Date.now();
+        if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
+      }
+    }
     if (q.interrupted && !interruptedPrompted) promptInterrupted(q.interrupted);
   }
   const badge = document.getElementById("activity-count");
@@ -81,6 +123,13 @@ async function poll() {
     toast("Connected to Spotify. ✓", { type: "success" });
     if (tab === "settings") showSettings();
   }
+  // One notice when YouTube rate-limits the background searches.
+  const paused = !!s.search?.paused_until;
+  if (paused && !searchPaused) {
+    toast("YouTube is rate-limiting searches, so searching ahead is paused for 3 minutes. Find still works — it's just not pre-loaded.",
+      { type: "warn", timeout: 9000 });
+  }
+  searchPaused = paused;
   emit("status", s);
 }
 
@@ -103,14 +152,16 @@ function renderStrip(s) {
   const spDot = sp.connected ? "ok" : sp.client_id_set ? "off" : "off";
   const spText = sp.connected ? "Spotify connected" : sp.client_id_set ? "Spotify disconnected" : "Spotify not set up";
   const libDot = lib.status === "ok" ? (lib.read_only ? "warn" : "ok") : "bad";
-  const libText = lib.status === "ok" ? (lib.read_only ? "Library read-only" : "Library OK") : "Library not found";
+  const libText = lib.status === "ok" ? `${lib.name || "Library"}${lib.read_only ? " (read-only)" : ""} ▾` : "No library open";
   const toolsOk = s.tools.ffmpeg && s.tools.ytdlp && s.tools.js && !s.queue.outdated;
   const toolsText = !s.tools.ffmpeg ? "ffmpeg missing" : !s.tools.ytdlp ? "yt-dlp broken" : s.queue.outdated ? "yt-dlp needs update"
     : !s.tools.js ? "JS runtime missing" : "Downloader OK";
   document.getElementById("status-strip").replaceChildren(
     h("span", { class: "pill clickable", title: sp.connected ? "Logged in" : "Click to set up / log in", onclick: () => showTab("settings") },
       h("span", { class: `dot ${spDot}` }), spText),
-    h("span", { class: "pill", title: lib.path || "" }, h("span", { class: `dot ${libDot}` }), libText),
+    h("span", { class: "pill clickable", title: s.genius?.configured ? "Used by Find samples in Cutting" : "Click to set up (free) for Find samples", onclick: () => showTab("settings") },
+      h("span", { class: `dot ${s.genius?.configured ? "ok" : "off"}` }), s.genius?.configured ? "Genius connected" : "Genius not set up"),
+    h("span", { class: "pill clickable", title: `${lib.path || ""}\nClick to switch library`, onclick: switchLibrary }, h("span", { class: `dot ${libDot}` }), libText),
     h("span", { class: "pill clickable", title: `ffmpeg ${s.tools.ffmpeg ? "found" : "missing"} · yt-dlp ${s.tools.ytdlp || "?"} · JS runtime ${s.tools.js || "missing"}`, onclick: () => showTab("settings") },
       h("span", { class: `dot ${toolsOk ? "ok" : "warn"}` }), toolsText),
   );
@@ -182,14 +233,10 @@ function showStartup(s) {
   };
   const logs = act("Open logs", () => post("/api/reveal", { target: "logs" }));
   let content;
-  if (lib.status === "needs_library") {
-    content = [
-      h("h1", {}, "Welcome to DJ Crate"),
-      h("p", {}, "Pick where your library lives. This one folder holds all your MP3s and DJ Crate's data — it's the folder Rekordbox will import from, and the folder you copy to move to a new Mac."),
-      h("div", { class: "actions" },
-        act(`Use ${lib.default_path.replace(/^\/Users\/[^/]+/, "~")}`, () => post("/api/library/default"), "primary"),
-        act("Choose a folder…", choose)),
-    ];
+  if (lib.status === "needs_library" || lib.status === "choose_library") {
+    const box = h("div", {}, h("p", {}, h("span", { class: "spinner" }), " Loading libraries…"));
+    renderPicker(box);
+    content = [box];
   } else if (lib.status === "library_missing") {
     content = [
       h("h1", {}, "Library not found"),
@@ -197,7 +244,8 @@ function showStartup(s) {
       h("p", {}, h("code", {}, lib.path || "?")),
       lib.error ? h("p", { class: "muted" }, lib.error) : null,
       h("p", {}, "If it's on an external drive, plug it in and click Retry. If you moved it, choose its new location."),
-      h("div", { class: "actions" }, act("Retry", () => post("/api/library/retry"), "primary"), act("Choose folder…", choose)),
+      h("div", { class: "actions" }, act("Retry", () => post("/api/library/retry"), "primary"), act("Choose folder…", choose),
+        act("Open a different library…", () => post("/api/library/switch"))),
     ];
   } else if (lib.status === "lock_conflict") {
     content = [
@@ -231,6 +279,80 @@ function showStartup(s) {
     content = [h("h1", {}, "Opening library…")];
   }
   overlay(content);
+}
+
+const tilde = (p) => (p || "").replace(/^\/Users\/[^/]+/, "~");
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  return days <= 0 ? "opened today" : days === 1 ? "opened yesterday" : `opened ${days} days ago`;
+}
+
+// Which library? Several people can share DJ Crate on one Mac — each library is
+// its own music, crates, notes and Spotify login.
+async function renderPicker(box) {
+  let d;
+  try { d = await get("/api/libraries"); } catch (e) { fill(box, h("p", {}, e.message)); return; }
+  const done = () => { startupKey = ""; poll(); };
+  const open = async (path) => {
+    try { await post("/api/library/choose", { path }); done(); } catch (e) { errorToast(e); }
+  };
+  const first = !d.libraries.length;
+  const name = h("input", { placeholder: first ? "Library name — e.g. your name" : "New library name — e.g. Sam", style: { flex: "1" } });
+  const create = async () => {
+    try { await post("/api/library/new", { name: name.value }); done(); } catch (e) { errorToast(e); }
+  };
+  name.addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
+  const ask = h("input", { type: "checkbox", class: "sel", checked: !d.ask_on_launch });
+  ask.addEventListener("change", () => post("/api/library/prefs", { ask_on_launch: !ask.checked }).catch(errorToast));
+  const list = d.libraries.map((l) => h("div", {
+    class: `item${l.exists ? "" : " disabled"}`,
+    onclick: () => l.exists && open(l.path),
+    title: l.exists ? `Open ${l.path}` : "Folder not found — reconnect the drive, or remove it from this list",
+  },
+    h("div", { class: "cover placeholder" }, "◉"),
+    h("div", { class: "grow" },
+      h("div", { class: "t-title" }, l.name),
+      h("div", { class: "t-sub" }, [tilde(l.path), l.exists ? `${l.tracks ?? "?"} songs` : "not found", timeAgo(l.last_opened)].filter(Boolean).join(" · "))),
+    h("button", {
+      class: "icon-btn small", title: "Remove from this list (doesn't delete anything)",
+      onclick: async (e) => {
+        e.stopPropagation();
+        try { await post("/api/library/forget", { path: l.path }); renderPicker(box); } catch (err) { errorToast(err); }
+      },
+    }, "✕")));
+  fill(box,
+    h("h1", {}, first ? "Welcome to DJ Crate" : "Which library?"),
+    h("p", {}, first
+      ? "Create your library. It's one folder holding your MP3s and DJ Crate's data — the folder Rekordbox imports, and the one you copy to move to a new Mac."
+      : "Each library has its own music, crates, notes and Spotify login — so several people can share DJ Crate on this Mac."),
+    list.length ? h("div", { class: "list" }, list) : null,
+    h("div", { class: "section-title" }, first ? "Name it" : "Or start a new one"),
+    h("div", { class: "row gap" }, name, h("button", { class: `btn ${first ? "primary" : ""}`, onclick: create }, "+ Create library")),
+    h("p", { class: "muted small" }, `New libraries go in ${tilde(d.libraries_dir)}/<name>.`),
+    h("div", { class: "row gap", style: { marginTop: "6px" } },
+      h("button", {
+        class: "btn", onclick: async () => {
+          const p = await native.pickFolder("Library folder path:");
+          if (p) { try { await post("/api/library/choose", { path: p, create: true }); done(); } catch (e) { errorToast(e); } }
+        },
+      }, "Open a folder…"),
+      h("span", { class: "muted small" }, "an existing library, e.g. on an external SSD")),
+    first ? null : h("label", { class: "row gap", style: { marginTop: "16px", cursor: "pointer" } }, ask,
+      "Don't ask again — always open the last library"),
+    first ? null : h("p", { class: "muted small" }, "You can switch any time by clicking the library name at the top."),
+  );
+  if (first) setTimeout(() => name.focus(), 50);
+}
+
+async function switchLibrary() {
+  try {
+    closePlayer();
+    await post("/api/library/switch");
+    startupKey = "";
+    poll();
+  } catch (e) { errorToast(e); }
 }
 
 function showCrash() {
@@ -285,6 +407,11 @@ async function renderActivity() {
         btn("Clear", () => post("/api/errors/clear"))),
       d.app_errors.slice(0, 10).map((e) => h("div", { class: "job" }, h("div", { class: "jt" }, e.message), h("div", { class: "jm" }, e.time))));
   }
+  const pausedUntil = store.status?.search?.paused_until;
+  if (pausedUntil) {
+    sections.unshift(h("div", { class: "job" }, h("div", { class: "jt" }, "Searching ahead is paused"),
+      h("div", { class: "jm" }, `YouTube rate-limited searches. It resumes at ${new Date(pausedUntil * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`)));
+  }
   if (!sections.length) sections.push(h("div", { class: "job" }, h("div", { class: "jm" }, "All quiet. Downloads and problems show up here.")));
   fill(panel, sections);
 }
@@ -330,6 +457,7 @@ function init() {
   window.addEventListener("error", (e) => console.error(e.error || e.message));
   window.addEventListener("unhandledrejection", (e) => { console.error(e.reason); });
   initCrates();
+  initRack();
   poll();
   setInterval(poll, 2000);
 }

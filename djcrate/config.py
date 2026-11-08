@@ -16,7 +16,10 @@ APP_SUPPORT_DIR = Path(os.environ.get("DJCRATE_APP_SUPPORT", Path.home() / "Libr
 LOG_DIR = Path(os.environ.get("DJCRATE_LOG_DIR", Path.home() / "Library" / "Logs" / APP_NAME))
 CONFIG_PATH = APP_SUPPORT_DIR / "config.json"
 
-DEFAULT_LIBRARY = Path.home() / "Music" / APP_NAME / "Library"
+REPO_DIR = Path(__file__).resolve().parent.parent
+# Everything lives inside the DJ-Crate folder: code, the app, and libraries.
+LIBRARIES_DIR = Path(os.environ.get("DJCRATE_LIBRARIES_DIR", REPO_DIR / "Libraries"))
+DEFAULT_LIBRARY = LIBRARIES_DIR / "My Library"
 DEFAULT_PORT = 8765
 
 log = logging.getLogger("djcrate")

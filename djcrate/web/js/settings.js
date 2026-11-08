@@ -1,6 +1,6 @@
 // Settings tab: Spotify, library, downloads/tools, backups, logs.
 
-import { get, native, patch, post } from "./api.js";
+import { del, get, native, patch, post, put } from "./api.js";
 import { emit, store } from "./store.js";
 import { confirmDialog, copyText, errorToast, h, modal, toast } from "./ui.js";
 
@@ -57,26 +57,92 @@ export async function showSettings() {
     h("div", { class: "line" }, cid, saveCid, loginBtn),
     h("p", { class: "muted small" }, "Your login is stored in the macOS Keychain, not in the library folder."));
 
+  // ---- Genius (sample lookup)
+  const gConnected = !!store.status?.genius?.configured;
+  const gToken = h("input", { placeholder: gConnected ? "Saved — paste a new one to replace it" : "Paste your access token", spellcheck: false });
+  const saveToken = h("button", { class: "btn" }, "Save");
+  saveToken.onclick = async () => {
+    saveToken.disabled = true;
+    try {
+      await put("/api/genius/token", { token: gToken.value });
+      toast("Genius connected.", { type: "success" });
+      emit("poll");
+      setTimeout(showSettings, 300);
+    } catch (e) { errorToast(e); } finally { saveToken.disabled = false; }
+  };
+  const geniusCard = card("Genius (sample lookup)",
+    h("p", {}, gConnected ? "● Connected." : "Not set up yet."),
+    h("ol", {},
+      h("li", {}, "Go to ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: "https://genius.com/api-clients" }); } }, "genius.com/api-clients"),
+        " and log in (a free Genius account is fine)."),
+      h("li", {}, "New API Client → any name (e.g. “DJ Crate”), App Website URL ", h("code", {}, "http://127.0.0.1"), ", Save."),
+      h("li", {}, "Click ", h("b", {}, "Generate Access Token"), ", copy it, paste it here and Save.")),
+    h("div", { class: "line" }, gToken, saveToken,
+      gConnected ? h("button", {
+        class: "btn", onclick: async () => {
+          try { await del("/api/genius/token"); emit("poll"); setTimeout(showSettings, 300); } catch (e) { errorToast(e); }
+        },
+      }, "Disconnect") : null),
+    h("p", { class: "muted small" }, "Used by Find samples in Cutting: Genius lists what a song samples and what sampled it. WhoSampled has no public API, so its button just opens the website."),
+    h("p", { class: "muted small" }, "Your token is stored in the macOS Keychain, not in the library folder."));
+
+  // ---- Rekordbox
+  const rbCard = rekordboxCard(card, store.status?.rekordbox || {});
+
+  // ---- Genres
+  const gl = store.status?.genres || {};
+  const glToggle = h("input", { type: "checkbox", class: "sel", checked: !!gl.on });
+  glToggle.addEventListener("change", async () => {
+    try { await put("/api/genres/lookup", { on: glToggle.checked }); emit("poll"); setTimeout(showSettings, 300); } catch (e) { errorToast(e); }
+  });
+  const genresCard = card("Genres",
+    h("p", {}, "Your genres live in the ", h("b", {}, "Genre Rack"), " tab: a list you build, with sub-genres. Songs only get genres from it. DJ Crate writes them into each MP3's Genre tag as “Parent / Sub-genre”, so Rekordbox shows them."),
+    h("p", { class: "muted small" }, "In Rekordbox, a song it already has needs right-click → Reload Tag to pick up a changed genre (to be confirmed once tried). A ⚠ next to a song's genre means Rekordbox currently has something different."),
+    h("label", { class: "row gap", style: { cursor: "pointer" } }, glToggle, "Suggest genres from MusicBrainz (looks up songs in the background, about one per second)"),
+    gl.on ? h("p", {}, gl.paused_until
+      ? "⏸ MusicBrainz is busy or unreachable — trying again in a few minutes."
+      : gl.pending ? `Looking up songs… ${gl.looked_up} done, ${gl.pending} to go.` : `All songs looked up (${gl.found} had suggestions).`) : null,
+    h("p", { class: "muted small" }, "Suggestions are faint chips in a song's Genre cell (one click to use) and in its [+] dropdown. Nothing is applied until you click one. MusicBrainz knows many songs only by their artist's genres (shown with a dashed outline), and some not at all. Songs that already have a genre in Rekordbox or their MP3 are skipped."));
+
   // ---- Library
-  const libraryCard = card("Library folder",
+  const libName = h("input", { value: s.library_name, style: { width: "260px" } });
+  libName.addEventListener("change", async () => {
+    try { await patch("/api/settings", { library_name: libName.value }); toast("Renamed.", { type: "success" }); emit("poll"); } catch (e) { errorToast(e); }
+  });
+  const askBox = h("input", { type: "checkbox", class: "sel", checked: s.ask_on_launch });
+  askBox.addEventListener("change", () => post("/api/library/prefs", { ask_on_launch: askBox.checked }).catch(errorToast));
+  const libraryCard = card("Library",
     h("p", {}, "One folder holds every MP3 plus DJ Crate's data (", h("code", {}, ".djcrate/"), "). Import this folder in Rekordbox. To move to a new Mac, copy this folder."),
+    h("div", { class: "line" }, "Name: ", libName),
     h("div", { class: "line" }, h("code", {}, s.library_path)),
     h("div", { class: "line" },
       h("button", { class: "btn", onclick: () => post("/api/reveal", { target: "library" }) }, "Show in Finder"),
       h("button", {
         class: "btn", onclick: async () => {
-          const p = await native.pickFolder("New library folder:");
-          if (!p) return;
-          if (!(await confirmDialog("Switch library?", `Open ${p} as your library? If it has no DJ Crate data yet, it starts empty. Your current library is untouched.`, { ok: "Switch" }))) return;
-          try { await post("/api/library/choose", { path: p }); location.reload(); } catch (e) { errorToast(e); }
+          try { await post("/api/library/switch"); emit("show-tab", "crates"); emit("poll"); } catch (e) { errorToast(e); }
         },
       }, "Switch library…"),
-      h("button", { class: "btn", onclick: () => emit("rescan") }, "Rescan for missing files")));
+      h("button", { class: "btn", onclick: () => emit("rescan") }, "Rescan for missing files")),
+    h("label", { class: "row gap", style: { cursor: "pointer", marginTop: "6px" } }, askBox, "Ask which library to open when DJ Crate starts"),
+    h("p", { class: "muted small" }, "Each library has its own music, crates, notes and Spotify login — handy when several people share this Mac."));
 
   // ---- Downloads
   const browser = h("select", {}, s.cookie_browsers.map((b) => h("option", { value: b, selected: b === s.cookies_browser }, b ? b[0].toUpperCase() + b.slice(1) : "Off")));
   browser.addEventListener("change", async () => {
     try { await patch("/api/settings", { cookies_browser: browser.value }); toast("Saved.", { type: "success" }); } catch (e) { errorToast(e); }
+  });
+  const aheadInput = h("input", { type: "number", min: "0", max: String(s.search_ahead_max), value: String(s.search_ahead), style: { width: "70px" } });
+  aheadInput.addEventListener("change", async () => {
+    const n = Number(aheadInput.value);
+    if (!Number.isInteger(n) || n < 0 || n > s.search_ahead_max) {
+      aheadInput.classList.add("invalid");
+      toast(`${s.search_ahead_max} max — searching further ahead makes YouTube rate-limit you (it can block downloads too). Not saved.`, { type: "error", timeout: 8000 });
+      aheadInput.value = String(s.search_ahead);
+      setTimeout(() => aheadInput.classList.remove("invalid"), 2500);
+      return;
+    }
+    try { await patch("/api/settings", { search_ahead: n }); s.search_ahead = n; toast(n ? `Searching ${n} song${n === 1 ? "" : "s"} ahead.` : "Searching ahead is off.", { type: "success" }); }
+    catch (e) { errorToast(e); aheadInput.value = String(s.search_ahead); }
   });
   const updateBtn = h("button", { class: "btn" }, "Update yt-dlp");
   updateBtn.onclick = () => updateYtdlp(updateBtn).then(showSettings);
@@ -90,6 +156,8 @@ export async function showSettings() {
       h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); showSettings(); } }, "Re-check")),
     h("p", { class: "muted small" }, "YouTube needs yt-dlp to run a bit of JavaScript. Without Deno or Node, some audio formats go missing and downloads fail more often."),
     h("p", { class: "muted small" }, "YouTube changes things often. If downloads start failing, Update yt-dlp usually fixes it."),
+    h("div", { class: "line" }, "Search ahead: ", aheadInput, " songs", h("span", { class: "muted small" }, `(0 = off, max ${s.search_ahead_max})`)),
+    h("p", { class: "muted small" }, "When you open Find on a song, DJ Crate quietly searches the next few songs too, so theirs open instantly. More than 10 gets you rate-limited by YouTube."),
     h("div", { class: "line" }, "Use cookies from browser: ", browser),
     h("p", { class: "muted small" }, "Only needed for age-restricted videos or “confirm you're not a bot” errors. Uses your logged-in YouTube session from that browser."),
     h("p", { class: "muted small" }, "Files are saved as “Title - Artist.mp3” (MP3, constant 192 kbps — steady cue points on CDJs) in the library folder."));
@@ -118,7 +186,7 @@ export async function showSettings() {
     h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")),
     h("p", { class: "muted small" }, `DJ Crate ${store.status?.version || ""}`));
 
-  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, libraryCard, downloadsCard, backupsCard, troubleCard));
+  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, genresCard, libraryCard, downloadsCard, backupsCard, troubleCard));
 }
 
 export async function updateYtdlp(btn) {
@@ -169,4 +237,64 @@ async function changePort() {
       },
     }],
   });
+}
+
+// ------------------------------------------------ Rekordbox (BPM & key in, crates & sets out)
+
+function ago(seconds) {
+  if (!seconds) return "never";
+  const d = Math.max(0, Date.now() / 1000 - seconds);
+  if (d < 60) return "just now";
+  if (d < 3600) return `${Math.round(d / 60)} min ago`;
+  if (d < 86400) return `${Math.round(d / 3600)} h ago`;
+  return `${Math.round(d / 86400)} d ago`;
+}
+
+function rekordboxCard(card, rb) {
+  const ex = rb.export || {};
+  const again = () => { emit("poll"); setTimeout(showSettings, 300); };
+  const run = (fn) => async () => { try { await fn(); again(); } catch (e) { errorToast(e); } };
+
+  const choose = async () => {
+    const path = await native.pickFile("xml", "Path to your Rekordbox XML (File → Export Collection in xml format):");
+    if (!path) return;
+    await put("/api/rekordbox/xml", { path });
+  };
+  const inLine = rb.path
+    ? [h("p", {}, rb.error ? `⚠ ${rb.error}` : `● ${rb.matched} of ${rb.total} downloaded songs matched · updated ${ago(rb.at)}`),
+      h("div", { class: "line" }, h("code", {}, rb.path)),
+      h("div", { class: "line" },
+        h("button", { class: "btn", onclick: run(() => post("/api/rekordbox/import")) }, "Import now"),
+        h("button", { class: "btn", onclick: run(choose) }, "Choose a different file…"),
+        h("button", { class: "btn", onclick: run(() => del("/api/rekordbox/xml")) }, "Stop using this file")),
+      h("p", { class: "muted small" }, "Re-export over the same file in Rekordbox and DJ Crate picks up the change within about 10 seconds.")]
+    : [h("div", { class: "line" }, h("button", { class: "btn primary", onclick: run(choose) }, "Choose XML file…"))];
+
+  const toggle = h("input", { type: "checkbox", class: "sel", checked: !!ex.on });
+  toggle.addEventListener("change", run(() => put("/api/rekordbox/export", { on: toggle.checked })));
+  const outStatus = !ex.on ? null : ex.error ? `⚠ ${ex.error}`
+    : `Updated ${ago(ex.at)} · ${ex.playlists} playlists · ${ex.songs} songs${ex.skipped ? ` · ${ex.skipped} not downloaded yet (left out)` : ""}`;
+
+  return card("Rekordbox",
+    h("p", {}, "DJ Crate and Rekordbox talk through files Rekordbox officially reads and writes. DJ Crate never touches Rekordbox's database."),
+    h("h4", {}, "BPM & key from Rekordbox"),
+    h("ol", {},
+      h("li", {}, "In Rekordbox: File → ", h("b", {}, "Export Collection in xml format"), ", e.g. into your library folder."),
+      h("li", {}, "Choose that file here. Re-export whenever you analyse or fix songs.")),
+    ...inLine,
+    h("p", { class: "muted small" }, "The Genre in that file is read too. It shows as a suggestion on songs with no genre yet, and as a ⚠ if it differs from the genre DJ Crate writes. DJ Crate's own genres are never changed by it."),
+    h("h4", {}, "Send crates & sets to Rekordbox"),
+    h("label", { class: "row gap", style: { cursor: "pointer" } }, toggle, "Send my crates & sets to Rekordbox"),
+    h("p", { class: "muted small" }, "When this is on, DJ Crate creates ", h("code", {}, "DJ Crate for Rekordbox.xml"),
+      " in your library folder and keeps it up to date by itself, every time you change a crate or set. You don't make, export or edit that file. The steps below happen in Rekordbox."),
+    outStatus ? h("p", {}, outStatus) : null,
+    ex.on ? h("div", { class: "line" },
+      h("button", { class: "btn", onclick: () => post("/api/rekordbox/export/reveal").catch(errorToast) }, "Show in Finder"),
+      h("button", { class: "btn", onclick: async () => { await copyText(ex.path); toast("Path copied."); } }, "Copy path")) : null,
+    h("p", {}, "One-time setup in Rekordbox:"),
+    h("ol", {},
+      h("li", {}, "Rekordbox → Preferences → Advanced → Database → rekordbox xml → Imported Library: choose that file."),
+      h("li", {}, "Preferences → View → Layout: tick “rekordbox xml” so it shows in the sidebar."),
+      h("li", {}, "In that section, right-click a playlist → Import Playlist. Do it again after changing a crate.")),
+    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order. Your notes stay in DJ Crate. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
 }
