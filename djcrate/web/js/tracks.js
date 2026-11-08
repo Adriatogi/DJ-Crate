@@ -96,9 +96,7 @@ function renderEmpty() {
       "smart:needs_link": "Every song has a link. 🎉",
       "smart:to_download": "Nothing waiting to download.",
       "smart:downloaded": "No downloads yet.",
-      "smart:ready": "Nothing marked Ready yet.",
-      "smart:broken": "Nothing marked Broken. 👍",
-      "smart:check_version": "No length mismatches — every download matches its Spotify length (or is marked Edited).",
+      "smart:check_version": "No length mismatches — every download matches its Spotify length.",
       "smart:missing": "No missing files.",
     };
     content = [h("h3", {}, msgs[v] || "Nothing here")];
@@ -113,7 +111,7 @@ function coverEl(t) {
 }
 
 function rowFor(t) {
-  const tr = h("tr", { class: `track${t.removed_from_source ? " removed" : ""}${t.broken ? " broken-song" : ""}`, dataset: { id: t.id } });
+  const tr = h("tr", { class: `track${t.removed_from_source ? " removed" : ""}`, dataset: { id: t.id } });
   // Only the cover, title and artist open the song card (rows are easy to misclick).
   const opens = (td) => {
     td.classList.add("opens");
@@ -144,9 +142,6 @@ function rowFor(t) {
     h("td", { class: "c-genre" }, genreControl(t)),
     h("td", { class: "c-link" }, linkCell(t)),
     h("td", { class: "c-play" }, playButton(t, tr)),
-    h("td", { class: "c-flag" }, flag(t, "edited")),
-    h("td", { class: "c-flag" }, flag(t, "ready")),
-    h("td", { class: "c-flag" }, flag(t, "broken")),
     h("td", { class: "c-status" }, statusCell(t)),
     h("td", { class: "c-action" }, actionButton(t)),
   );
@@ -198,27 +193,6 @@ function linkCell(t) {
   return h("div", { class: "link-cell" }, input, find);
 }
 
-function flag(t, field) {
-  const titles = {
-    edited: "Edited — you changed the audio on purpose (skips the length check)",
-    ready: "Ready — prepped and gig-ready",
-    broken: "Broken — something's wrong with this song and it needs fixing (say what in its notes)",
-  };
-  const cb = h("input", { type: "checkbox", class: `flag ${field}`, checked: !!t[field], title: titles[field] });
-  cb.addEventListener("change", async () => {
-    const value = cb.checked;
-    try {
-      const r = await patch(`/api/tracks/${t.id}`, { [field]: value });
-      updateTrack(r.track);
-      emit("refresh-sidebar");
-    } catch (e) {
-      cb.checked = !value; // revert the optimistic change
-      errorToast(e);
-    }
-  });
-  return cb;
-}
-
 function statusCell(t) {
   const chips = [];
   const s = t.download_status;
@@ -246,7 +220,7 @@ function statusCell(t) {
     chips.push(h("span", {
       class: "chip warn",
       title: `The file is ${fmtMs(t.file_duration_ms)} but Spotify says ${fmtMs(t.duration_ms)} (${fmtDiff(t.file_duration_ms - t.duration_ms)}).\n` +
-        "Check you got the right version — or tick Edited if you cut it on purpose.",
+        "Check you got the right version of the song.",
     }, "⚠ Check version"));
   }
   if (t.tag_error) chips.push(h("span", { class: "chip warn", title: t.tag_error + "\nOpen the song and click Retry tags." }, "Tags failed"));
@@ -362,17 +336,6 @@ function renderBulkbar() {
   bar.hidden = false;
   const viewCrate = store.view.startsWith("crate:") ? findCrate(Number(store.view.split(":")[1])) : null;
   const inCrate = !!viewCrate && viewCrate.kind !== "folder" && !viewCrate.genre_id; // genre crates follow their genre
-  const markBtn = h("button", { class: "btn small" }, "Mark ▾");
-  markBtn.onclick = () => menu(markBtn, [
-    { label: "Edited ✓", fn: () => bulk(ids, "edited", true) },
-    { label: "Edited ✕", fn: () => bulk(ids, "edited", false) },
-    "-",
-    { label: "Ready ✓", fn: () => bulk(ids, "ready", true) },
-    { label: "Ready ✕", fn: () => bulk(ids, "ready", false) },
-    "-",
-    { label: "Broken ✓", fn: () => bulk(ids, "broken", true) },
-    { label: "Broken ✕", fn: () => bulk(ids, "broken", false) },
-  ]);
   const addBtn = h("button", { class: "btn small" }, "Add to crate ▾");
   addBtn.onclick = () => {
     const crates = flatCrates().filter((c) => c.kind !== "folder");
@@ -384,21 +347,13 @@ function renderBulkbar() {
   genreBtn.onclick = () => openBulkGenre(genreBtn, ids);
   fill(bar,
     h("span", { class: "count" }, `${ids.length} selected`),
-    markBtn, addBtn, genreBtn,
+    addBtn, genreBtn,
     h("button", { class: "btn small", onclick: () => startDownloads(ids) }, "⬇ Download"),
     inCrate ? h("button", { class: "btn small", onclick: () => removeFromCrate(ids) }, "Remove from crate") : null,
     h("button", { class: "btn small danger", onclick: () => deleteFromLibrary(ids) }, "Delete from library…"),
     h("div", { class: "spacer" }),
     h("button", { class: "btn small ghost", onclick: () => { selected.clear(); syncSelection(); } }, "Clear selection"),
   );
-}
-
-async function bulk(ids, field, value) {
-  try {
-    await post("/api/tracks/bulk", { ids, field, value });
-    emit("refresh-tracks");
-    emit("refresh-sidebar");
-  } catch (e) { errorToast(e); }
 }
 
 async function addToCrate(ids, c) {

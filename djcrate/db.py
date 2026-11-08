@@ -286,10 +286,18 @@ MIGRATIONS.append(  # v8: Genre Rack (your own genre vocabulary), live genre cra
     """
 )
 
+MIGRATIONS.append(  # v9: the Edited / Ready / Broken flags are gone
+    """
+    ALTER TABLE tracks DROP COLUMN edited;
+    ALTER TABLE tracks DROP COLUMN ready;
+    ALTER TABLE tracks DROP COLUMN broken
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 CHECK_VERSION_SQL = (
-    "(t.download_status = 'done' AND t.edited = 0 AND t.duration_ms IS NOT NULL "
+    "(t.download_status = 'done' AND t.duration_ms IS NOT NULL "
     f"AND t.file_duration_ms IS NOT NULL AND abs(t.file_duration_ms - t.duration_ms) > {LENGTH_TOLERANCE_MS})"
 )
 
@@ -298,8 +306,6 @@ SMART_CRATES: dict[str, tuple[str, str]] = {
     "needs_link": ("Needs Link", "(coalesce(t.source_url, '') = '' AND t.download_status NOT IN ('done', 'missing'))"),
     "to_download": ("Ready to Download", "(coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error'))"),
     "downloaded": ("Downloaded", "t.download_status = 'done'"),
-    "ready": ("Ready", "t.ready = 1"),
-    "broken": ("Broken", "t.broken = 1"),
     "check_version": ("Check Version", CHECK_VERSION_SQL),
     "missing": ("Missing Files", "t.download_status = 'missing'"),
 }
@@ -462,10 +468,10 @@ def upsert_track(conn, meta: dict) -> tuple[int, bool]:
 
 def track_to_dict(row) -> dict:
     d = dict(row)
-    for flag in ("edited", "ready", "broken", "is_manual"):
+    for flag in ("is_manual",):
         d[flag] = bool(d.get(flag))
     d["check_version"] = bool(
-        d["download_status"] == "done" and not d["edited"] and d["duration_ms"] and d["file_duration_ms"]
+        d["download_status"] == "done" and d["duration_ms"] and d["file_duration_ms"]
         and abs(d["file_duration_ms"] - d["duration_ms"]) > LENGTH_TOLERANCE_MS
     )
     if "removed_from_source" in d:

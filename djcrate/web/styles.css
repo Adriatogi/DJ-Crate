@@ -73,18 +73,6 @@ input.sel:checked, input.sel:indeterminate { background: var(--accent); border-c
 input.sel:checked::after { content: "✓"; color: white; font-size: 11px; font-weight: 700; }
 input.sel:indeterminate::after { content: "–"; color: white; font-size: 12px; font-weight: 700; }
 
-/* status flags (Edited / Ready / Broken): round, colored */
-.flag {
-  appearance: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #4a4a56; margin: 0;
-  cursor: pointer; display: inline-grid; place-content: center; background: transparent; transition: all .12s;
-}
-.flag:hover { border-color: #777; }
-.flag:checked::after { content: "✓"; font-size: 11px; font-weight: 800; color: #0d0d10; }
-.flag.edited:checked { background: var(--blue); border-color: var(--blue); }
-.flag.ready:checked { background: var(--green); border-color: var(--green); }
-.flag.broken:checked { background: var(--red); border-color: var(--red); }
-.flag.broken:checked::after { content: "!"; }
-#tracks tr.track.broken-song td.c-cover, #tracks tr.track.broken-song td:nth-child(3) { box-shadow: inset 3px 0 0 var(--red); }
 #tracks td.opens { cursor: pointer; }
 #tracks td.opens:hover .t-title, #tracks td.opens:hover.artist { text-decoration: underline; text-decoration-color: #ffffff55; }
 
@@ -158,7 +146,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .nav-item .more { visibility: hidden; }
 .nav-item:hover .more { visibility: visible; }
 .nav-item.smart-check_version .count:not(:empty), .nav-item.smart-missing .count:not(:empty) { color: var(--yellow); }
-.nav-item.smart-missing .count:not(:empty), .nav-item.smart-broken .count:not(:empty) { color: var(--red); }
+.nav-item.smart-missing .count:not(:empty) { color: var(--red); }
 .tree-children { padding-left: 14px; }
 .spotify-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--spotify); display: inline-block; }
 .root-drop {
@@ -203,10 +191,8 @@ table#tracks { width: 100%; border-collapse: collapse; table-layout: fixed; } /*
 .c-key { width: 82px; white-space: nowrap; }
 .c-link { width: 150px; }
 .c-play { width: 34px; }
-.c-flag { width: 56px; text-align: center !important; }
 .c-status { width: 120px; }
 .c-action { width: 116px; text-align: right; overflow: visible !important; }
-th.c-flag { font-size: 10px !important; }
 #tracks th.sortable { cursor: pointer; user-select: none; }
 #tracks th.sortable:hover { color: var(--text); }
 #tracks th.sorted { color: var(--accent-2); }
@@ -266,8 +252,6 @@ th.c-flag { font-size: 10px !important; }
 .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 8px; font-size: 12px; margin: 10px 0; }
 .kv .k { color: var(--muted); }
 .kv .v { overflow-wrap: anywhere; }
-.flags-row { display: flex; gap: 14px; margin: 12px 0; }
-.flags-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; margin: 16px 0 6px; }
 
 /* ------------------------------------------------ popovers, menus */
@@ -427,9 +411,6 @@ table.timeline { width: 100%; border-collapse: collapse; margin-top: 14px; table
 .bnode-text { min-width: 0; flex: 1; }
 .bnode-text .t-title, .bnode-text .t-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bnode-badges { display: flex; gap: 3px; }
-.dotflag { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #0d0d10; }
-.dotflag.ready { background: var(--green); }
-.dotflag.broken { background: var(--red); }
 .bnode-k-mix { background: #262234; border-color: #4a3f7a; min-width: 220px; max-width: 280px; }
 .bnode-k-text { background: #2b2618; border-color: #5c4d22; }
 .bnode-body.note { flex-direction: column; align-items: stretch; gap: 4px; cursor: default; }

@@ -7,7 +7,7 @@ Tools like spotdl download your Spotify playlists by guessing the YouTube video.
 1. Import a Spotify playlist. It becomes a **crate** with every song's title, artists, album, cover and length.
 2. Paste a YouTube link for each song, or use **Find ▾**. It shows the top results, highlights the one whose length matches Spotify's, and warns about "Radio Edit", "Live", "Sped up" and other versions.
 3. Hit **Download All**. Each song becomes a tagged `Title - Artist.mp3` in one library folder, which Rekordbox imports.
-4. Track your prep with three checkboxes: **Edited** (you cut the audio on purpose), **Ready** (prepped and gig-ready), **Broken** (needs fixing; say what in the notes). Each song also has its own notes.
+4. Write notes on any song (they stay in DJ Crate). The Genre Rack, Cutting and Set Setter keep the rest of your prep in one place.
 5. Plan sets in **Set Setter**: an ordered running list with cue times, transition notes and running time, exportable as text.
 
 6. **BPM & key from Rekordbox.** Export your collection as XML from Rekordbox and DJ Crate shows sortable BPM and Key columns (`8A · Am`), refreshing whenever you re-export.
@@ -82,10 +82,10 @@ Each person logs in to their own Spotify account. They can create their own deve
 
 ### Crates
 - **All Tracks** holds every song you have. **Smart crates** fill themselves: Needs Link, Ready to Download, Downloaded, Ready, Broken, ⚠ Check Version, Missing Files.
-- **Your crates and folders:** create them with **+♪** and **+📁**. Drag crates into folders, and drag songs onto crates. Every crate shows its progress (`12/30 ↓ · 8 ready · 1 broken`).
+- **Your crates and folders:** create them with **+♪** and **+📁**. Drag crates into folders, and drag songs onto crates. Every crate shows its progress (`12/30 ↓`).
 - **One song, one record.** If a song is in five crates, it's still one song. Its link, file, checkmarks and notes are shared everywhere.
 - **Re-sync** a Spotify crate to pick up new songs. Songs removed on Spotify are **kept**, dimmed with a "Removed on Spotify" badge, so you never lose a file or your notes.
-- **Select songs** with the checkboxes, or the header box to select all. Then **Mark** (Edited / Ready / Broken), **Add to crate**, **Download**, **Remove from crate** (only takes it out of that crate), or **Delete from library** (asks first; the MP3 goes to the Trash).
+- **Select songs** with the checkboxes, or the header box to select all. Then **Add to crate**, **Genre**, **Download**, **Remove from crate** (only takes it out of that crate), or **Delete from library** (asks first; the MP3 goes to the Trash).
 - **Sort** by clicking a column header (first click ascending, second descending, third back to default), or use **Sort ▾**, which also has Date added.
 - **Add track** handles songs that aren't on Spotify, such as bootlegs and edits; SoundCloud and Bandcamp links work too. **Import folder** adds MP3s you already have.
 
@@ -94,7 +94,7 @@ Each person logs in to their own Spotify account. They can create their own deve
 - **Find remembers results** for a week ("Saved results · Search again"). When you open Find, DJ Crate also quietly searches the **next 3 songs** that need a link, so theirs open instantly. Change this under **Settings → Downloads → Search ahead**, from 0 (off) to 10 max. If YouTube rate-limits the searches, it tells you and pauses for 3 minutes.
 - Files are saved as **`Title - Artist.mp3`**, with all artists, features included. They're tagged with title, artists, album, year, ISRC and cover art. The comment tag is never touched, so Rekordbox's Comments stay yours.
 - **Format: MP3, constant 192 kbps.** YouTube's audio is about 130 kbps, so higher bitrates don't add quality. Constant bitrate on purpose: variable-bitrate MP3s can make cue points drift between Rekordbox and CDJs.
-- **⚠ Check Version:** if a download is more than 5 seconds off Spotify's length, you probably got a different version. If you cut the song on purpose, tick **Edited** and the warning goes away.
+- **⚠ Check Version:** if a download is more than 5 seconds off Spotify's length, you probably got a different version. It's only a hint, so ignore it for a song you cut on purpose.
 - **▶** previews a downloaded song in a player under its row. Drag the slider to skip around; **Space** plays and pauses, **Esc** closes.
 - **The bell (Activity)** shows downloads in progress and failures, with the reason and a Retry button.
 
@@ -129,8 +129,8 @@ DJ Crate and Rekordbox stay **separate on purpose**, with one shared music folde
 1. Import from Spotify and paste links in DJ Crate.
 2. Download, then check with ▶ and the ⚠ length flag.
 3. In Rekordbox, drag the library folder (or just the new files) into **Collection**. Getting new downloads into Rekordbox is a manual step, so make it part of your routine.
-4. In Rekordbox: analyze, fix grids, set cues, and build playlists. Once a song is prepped and you know it, tick **Ready** in DJ Crate. If something's off (bad rip, wrong version, clipping), tick **Broken** and put what's wrong in its notes.
-6. If you edit a song's title, artists or notes in DJ Crate *after* importing, right-click it in Rekordbox and choose **Reload Tag**.
+4. In Rekordbox: analyze, fix grids, set cues, and build playlists. If something's off with a song (bad rip, wrong version, clipping), put what's wrong in its notes in DJ Crate.
+6. If you edit a song's title, artists or genres in DJ Crate *after* importing, right-click it in Rekordbox and choose **Reload Tag**.
 
 **BPM and key** come from Rekordbox's own analysis (so your fixes count), through its XML export. In Rekordbox: File → **Export Collection in xml format**. In DJ Crate: **Settings → Rekordbox → Choose XML file…**. Re-export over the same file and DJ Crate updates within ~10 seconds.
 

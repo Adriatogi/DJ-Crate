@@ -354,10 +354,10 @@ def sidebar(conn=Depends(get_conn)):
     crates = [dict(r) for r in conn.execute("SELECT * FROM crates ORDER BY position, id")]
     members: dict[int, dict[int, tuple]] = {}
     for r in conn.execute(
-        "SELECT ct.crate_id, ct.track_id, t.download_status = 'done' d, t.ready, t.broken "
+        "SELECT ct.crate_id, ct.track_id, t.download_status = 'done' d "
         "FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id"
     ):
-        members.setdefault(r[0], {})[r[1]] = (r[2], r[3], r[4])
+        members.setdefault(r[0], {})[r[1]] = (r[2],)
     children: dict[int | None, list[dict]] = {}
     for c in crates:
         children.setdefault(c["parent_id"], []).append(c)
@@ -370,8 +370,7 @@ def sidebar(conn=Depends(get_conn)):
         flags = list(tracks.values())
         return {
             **c, "children": kids, "_tracks": tracks,
-            "stats": {"total": len(flags), "downloaded": sum(f[0] for f in flags),
-                      "ready": sum(f[1] for f in flags), "broken": sum(f[2] for f in flags)},
+            "stats": {"total": len(flags), "downloaded": sum(f[0] for f in flags)},
         }
 
     tree = [build(c) for c in children.get(None, [])]
@@ -607,9 +606,6 @@ class TrackPatch(BaseModel):
     release_date: str | None = None
     notes: str | None = None
     source_url: str | None = None
-    edited: bool | None = None
-    ready: bool | None = None
-    broken: bool | None = None
 
 
 TAG_FIELDS = ("title", "artists", "album", "release_date")
@@ -633,9 +629,6 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
             dupe = conn.execute("SELECT title, artists FROM tracks WHERE source_url = ? AND id <> ?", (url, track_id)).fetchone()
             if dupe:
                 warnings.append(f"This link is already used by “{dupe['title']} – {dupe['artists']}”. Kept anyway.")
-    for k in ("edited", "ready", "broken"):
-        if k in changes:
-            changes[k] = int(changes[k])
     if not changes:
         return {"track": track, "warnings": warnings}
     with db.tx(conn):
@@ -644,11 +637,6 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
         if "title" in changes or "artists" in changes:
             t = conn.execute("SELECT title, artists FROM tracks WHERE id = ?", (track_id,)).fetchone()
             conn.execute("UPDATE tracks SET norm_key = ? WHERE id = ?", (db.norm_key(t["title"], t["artists"]), track_id))
-        if "edited" in changes and track["file_rel_path"]:
-            # Re-check the length against the file as it is now.
-            p = state.abs_path(track["file_rel_path"])
-            if p and p.is_file():
-                conn.execute("UPDATE tracks SET file_duration_ms = ? WHERE id = ?", (tags.duration_ms(p), track_id))
     updated = db.get_track(conn, track_id)
     if any(k in changes for k in TAG_FIELDS):
         warn = _write_file_tags(conn, updated, fetch_cover=False)
@@ -683,24 +671,6 @@ def retag(track_id: int, conn=Depends(get_conn)):
     if warn:
         raise AppError("tag_failed", warn)
     return {"track": db.get_track(conn, track_id)}
-
-
-class BulkBody(BaseModel):
-    ids: list[int]
-    field: str
-    value: bool
-
-
-@app.post("/api/tracks/bulk")
-def bulk_update(body: BulkBody, conn=Depends(get_conn)):
-    if body.field not in ("edited", "ready", "broken"):
-        raise AppError("bad_field", "Unknown field.")
-    with db.tx(conn):
-        conn.execute(
-            f"UPDATE tracks SET {body.field} = ?, updated_at = datetime('now') WHERE id IN ({placeholders(body.ids)})",
-            (int(body.value), *body.ids),
-        )
-    return {"updated": len(body.ids)}
 
 
 @app.post("/api/tracks/delete")

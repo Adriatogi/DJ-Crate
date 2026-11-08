@@ -316,8 +316,6 @@ export function songBody(song, { sub = null, badges = [] } = {}) {
       h("div", { class: "t-title" }, song?.title || "(deleted song)"),
       h("div", { class: "t-sub" }, sub ?? (song?.artists || ""))),
     h("div", { class: "bnode-badges" },
-      song?.ready ? h("span", { class: "dotflag ready", title: "Ready" }, "✓") : null,
-      song?.broken ? h("span", { class: "dotflag broken", title: "Broken" }, "!") : null,
       badges));
 }
 

@@ -12,7 +12,7 @@ let loadSeq = 0;
 
 const SORTS = {
   default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key", genre: "Genre",
-  added: "Date added", status: "Status", edited: "Edited", ready: "Ready", broken: "Broken",
+  added: "Date added", status: "Status",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
 store.sort = JSON.parse(localStorage.getItem("djc.sort") || '{"key":"default","dir":1}');
@@ -25,7 +25,6 @@ function sortValue(t, key) {
     case "genre": return t.genre_tag ? t.genre_tag.toLowerCase() : "\uffff"; // songs without a genre last
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
-    case "edited": case "ready": case "broken": return t[key] ? 1 : 0;
     default: return (t[key] || "").toLowerCase();
   }
 }
@@ -134,10 +133,7 @@ function renderToolbar() {
   document.getElementById("view-name").textContent = name;
   const ts = store.tracks;
   const done = ts.filter((t) => t.download_status === "done").length;
-  const ready = ts.filter((t) => t.ready).length;
-  const broken = ts.filter((t) => t.broken).length;
-  const meta = [`${ts.length} song${ts.length === 1 ? "" : "s"}`, `${done} downloaded`, `${ready} ready`];
-  if (broken) meta.push(`${broken} broken`);
+  const meta = [`${ts.length} song${ts.length === 1 ? "" : "s"}`, `${done} downloaded`];
   if (crate?.kind === "spotify" && crate.last_synced) meta.push(`synced ${crate.last_synced.slice(0, 16)} UTC`);
   if (crate?.kind === "spotify" && crate.spotify_playlist_id === "liked") meta.push("Liked Songs");
   document.getElementById("view-meta").textContent = meta.join(" · ");

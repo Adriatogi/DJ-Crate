@@ -117,7 +117,7 @@ async function save() {
       const fresh = new Map(r.nodes.map((n) => [n.id, n]));
       for (const n of nodes) {
         const s = fresh.get(n.id);
-        if (s) Object.assign(n, { title: s.title, artists: s.artists, cover_url: s.cover_url, ready: s.ready, broken: s.broken,
+        if (s) Object.assign(n, { title: s.title, artists: s.artists, cover_url: s.cover_url,
           duration_ms: s.duration_ms, download_status: s.download_status, saved: s.saved, label: s.label });
       }
       current = { ...r, nodes: current.nodes };
@@ -277,7 +277,7 @@ function render() {
 }
 
 function songProps(t) {
-  return { track_id: t.id, title: t.title, artists: t.artists, cover_url: t.cover_url, ready: t.ready, broken: t.broken,
+  return { track_id: t.id, title: t.title, artists: t.artists, cover_url: t.cover_url,
     duration_ms: t.file_duration_ms ?? t.duration_ms, download_status: t.download_status, label: `${t.title} — ${t.artists}` };
 }
 
@@ -335,7 +335,7 @@ function renderBoard() {
     nodes: nodes.map((n) => ({
       key: `n:${n.id}`, kind: n.kind, x: n.x, y: n.y, ghost: !onMain.has(n.id) && edges.some((e) => e.main), raw: n,
       body: n.kind === "song"
-        ? songBody({ title: n.title || n.label || "(deleted song)", artists: n.artists || "", cover_url: n.cover_url, ready: n.ready, broken: n.broken },
+        ? songBody({ title: n.title || n.label || "(deleted song)", artists: n.artists || "", cover_url: n.cover_url },
           { sub: [n.artists, n.length_ms ? `plays ${fmtMs(n.length_ms)}` : null, n.cue_time || null].filter(Boolean).join(" · ") })
         : noteBody(n.text, {
           title: n.kind === "text" ? "Note" : "Mix",
@@ -493,7 +493,7 @@ function renderListView() {
         r.cover_url ? h("img", { class: "cover", src: r.cover_url, alt: "" }) : h("div", { class: "cover placeholder" }, "♪"),
         h("div", { style: { minWidth: 0 } },
           h("div", { class: "t-title" }, r.title || r.label || "(deleted song)"),
-          h("div", { class: "t-sub" }, r.title ? [r.artists, r.download_status !== "done" ? "not downloaded" : null, r.ready ? "ready ✓" : null, r.broken ? "⚠ broken" : null].filter(Boolean).join(" · ") : "No longer in your library")))
+          h("div", { class: "t-sub" }, r.title ? [r.artists, r.download_status !== "done" ? "not downloaded" : null].filter(Boolean).join(" · ") : "No longer in your library")))
       : h("div", { class: "t-title" }, `— ${r.text || "note"} —`);
     return h("tr", { class: isSong ? "" : "free" },
       h("td", { class: "num" }, isSong ? n : ""),

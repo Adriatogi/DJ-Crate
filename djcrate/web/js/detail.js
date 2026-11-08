@@ -56,12 +56,6 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
     return h("div", { class: "field" }, h("label", {}, label), input);
   };
 
-  const flag = (key, label) => {
-    const cb = h("input", { type: "checkbox", class: `flag ${key}`, checked: !!t[key] });
-    cb.addEventListener("change", () => save({ [key]: cb.checked }, () => { cb.checked = !cb.checked; }));
-    return h("label", {}, cb, label);
-  };
-
   const hasFile = t.file_rel_path && t.download_status === "done";
   const lengthLine = t.file_duration_ms && t.duration_ms
     ? `${fmtMs(t.file_duration_ms)} (${fmtDiff(t.file_duration_ms - t.duration_ms)} vs Spotify)`
@@ -78,7 +72,6 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
         h("div", { class: "muted" }, t.artists),
         t.spotify_url ? h("a", { href: "#", class: "small", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.spotify_url }); } }, "Open in Spotify ↗") : null,
         extra)),
-    h("div", { class: "flags-row" }, flag("edited", "Edited"), flag("ready", "Ready"), flag("broken", "Broken")),
     h("div", { class: "field" }, h("label", {}, "Genre"), genreControl(t, { onSaved, max: 6 }),
       t.genres.length ? h("div", { class: "muted small", style: { marginTop: "4px" } },
         `Written into the MP3 as “${t.genre_tag}”. In Rekordbox: right-click the song → Reload Tag.`) : null),

@@ -17,14 +17,13 @@ def fmt_ms(ms: int | None) -> str:
 
 def _nodes(conn, set_id: int) -> list[dict]:
     rows = conn.execute(
-        """SELECT n.*, t.title, t.artists, t.cover_url, t.download_status, t.ready, t.broken,
+        """SELECT n.*, t.title, t.artists, t.cover_url, t.download_status,
                   coalesce(t.file_duration_ms, t.duration_ms) duration_ms, m.note mix_note
            FROM set_nodes n LEFT JOIN tracks t ON t.id = n.track_id LEFT JOIN mixes m ON m.id = n.mix_id
            WHERE n.set_id = ? ORDER BY n.id""", (set_id,)).fetchall()
     out = []
     for r in rows:
         d = dict(r)
-        d["ready"], d["broken"] = bool(d["ready"]), bool(d["broken"])
         if d["kind"] == "mix" and d["mix_id"] and d["mix_note"] is not None:
             d["text"] = d["mix_note"]  # linked to a saved mix: the saved note is the truth
         d["saved"] = bool(d["mix_id"] and d["mix_note"] is not None)
@@ -68,7 +67,6 @@ def main_path(nodes: list[dict], edges: list[dict]) -> list[dict]:
             "node_id": node["id"], "kind": node["kind"], "track_id": node["track_id"],
             "title": node.get("title"), "artists": node.get("artists"), "cover_url": node.get("cover_url"),
             "label": node["label"], "text": node["text"], "download_status": node.get("download_status"),
-            "ready": node.get("ready"), "broken": node.get("broken"),
             "duration_ms": node.get("duration_ms"), "length_ms": node["length_ms"], "cue_time": node["cue_time"],
             "start_ms": elapsed if node["kind"] == "song" else None, "played_ms": played if node["kind"] == "song" else 0,
             "transition": None,

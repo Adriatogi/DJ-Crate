@@ -15,14 +15,14 @@ def test_crates_folders_and_shared_metadata(client):
     t = mk(client, title="Strobe", artists="deadmau5", crate_id=a)
     client.post(f"/api/crates/{b}/tracks", json={"ids": [t["id"]]})
     # A change in one crate shows in the other: it's the same row.
-    client.patch(f"/api/tracks/{t['id']}", json={"notes": "drop at 1:04", "ready": True})
+    client.patch(f"/api/tracks/{t['id']}", json={"notes": "drop at 1:04"})
     tb = client.get(f"/api/tracks?view=crate:{b}").json()["tracks"][0]
-    assert tb["notes"] == "drop at 1:04" and tb["ready"]
+    assert tb["notes"] == "drop at 1:04"
     # Folder view shows its crates' songs
     assert len(client.get(f"/api/tracks?view=crate:{folder}").json()["tracks"]) == 1
     side = client.get("/api/sidebar").json()
     assert side["smart"][0] == {"key": "all", "name": "All Tracks", "count": 1}
-    assert side["tree"][0]["stats"]["ready"] == 1
+    assert side["tree"][0]["stats"] == {"total": 1, "downloaded": 0}
     # Can't move a folder into itself
     assert client.patch(f"/api/crates/{folder}", json={"move": True, "parent_id": folder}).status_code == 400
     # Deleting a crate never deletes songs
@@ -52,7 +52,7 @@ def test_remove_from_crate_with_undo(client):
     assert len(client.get(f"/api/tracks?view=crate:{c}").json()["tracks"]) == 1
 
 
-def test_edited_bypasses_length_check(client, lib, make_mp3):
+def test_check_version_flags_a_length_mismatch(client, lib, make_mp3):
     t = mk(client, title="Cut", artists="Me")
     mp3 = make_mp3(lib.library / "Cut - Me.mp3", seconds=3)
     conn = lib.conn()
@@ -60,10 +60,8 @@ def test_edited_bypasses_length_check(client, lib, make_mp3):
                  (lib.rel_path(mp3), tags.duration_ms(mp3), t["id"]))
     smart = lambda: {s["key"]: s["count"] for s in client.get("/api/sidebar").json()["smart"]}
     assert smart()["check_version"] == 1
-    r = client.patch(f"/api/tracks/{t['id']}", json={"edited": True}).json()["track"]
-    assert r["check_version"] is False and smart()["check_version"] == 0
-    client.patch(f"/api/tracks/{t['id']}", json={"edited": False})
-    assert smart()["check_version"] == 1
+    assert client.get("/api/tracks?view=smart:check_version").json()["tracks"][0]["check_version"] is True
+    assert not {"ready", "broken"} & set(smart())  # the Ready / Broken smart crates are gone
 
 
 def test_metadata_edit_rewrites_tags_not_filename(client, lib, make_mp3):
@@ -189,7 +187,7 @@ def test_switch_blocked_while_downloading(client, lib):
     assert r.status_code == 400 and r.json()["error"]["code"] == "busy"
 
 
-def test_upgrade_turns_verified_into_ready(tmp_path):
+def test_old_libraries_upgrade_and_lose_the_old_flag_columns(tmp_path):
     import sqlite3
     from djcrate import db
     from djcrate.state import AppState
@@ -206,6 +204,8 @@ def test_upgrade_turns_verified_into_ready(tmp_path):
     conn.close()
     st = AppState()
     st.open(lib)
-    rows = st.conn().execute("SELECT title, ready, broken FROM tracks ORDER BY title").fetchall()
-    assert [tuple(r) for r in rows] == [("A", 1, 0), ("B", 0, 0)]
+    conn2 = st.conn()
+    assert [r[0] for r in conn2.execute("SELECT title FROM tracks ORDER BY title")] == ["A", "B"]
+    cols = {r[1] for r in conn2.execute("PRAGMA table_info(tracks)")}
+    assert not {"edited", "ready", "broken", "verified", "cleaned"} & cols
     st.release_lock()

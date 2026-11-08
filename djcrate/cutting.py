@@ -12,7 +12,7 @@ from collections import deque
 from . import db
 from .errors import AppError
 
-BRIEF = "id, title, artists, album, cover_url, duration_ms, file_duration_ms, download_status, ready, broken, source_url"
+BRIEF = "id, title, artists, album, cover_url, duration_ms, file_duration_ms, download_status, source_url"
 
 
 def label_of(conn, track_id: int) -> str:
@@ -28,7 +28,6 @@ def briefs(conn, ids) -> dict[int, dict]:
     out = {}
     for r in rows:
         d = dict(r)
-        d["ready"], d["broken"] = bool(d["ready"]), bool(d["broken"])
         out[d["id"]] = d
     return out
 
@@ -264,7 +263,7 @@ def cutting_songs(conn, q: str = "", only_connected: bool = False) -> list[dict]
         where = "(t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ?)"
         params = [f"%{q.strip()}%"] * 3
     rows = conn.execute(f"""
-        SELECT t.id, t.title, t.artists, t.cover_url, t.ready, t.broken,
+        SELECT t.id, t.title, t.artists, t.cover_url,
                (SELECT count(DISTINCT mix_id) FROM mix_songs ms WHERE ms.track_id = t.id) mixes,
                (SELECT count(*) FROM samples s WHERE s.track_id = t.id OR s.sample_track_id = t.id) samples
         FROM tracks t WHERE {where} ORDER BY t.title COLLATE NOCASE, t.artists COLLATE NOCASE""", params).fetchall()
