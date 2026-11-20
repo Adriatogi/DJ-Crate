@@ -126,6 +126,9 @@ class DownloadManager:
         self.procs: dict[int, subprocess.Popen] = {}
         self.threads: list[threading.Thread] = []
         self._claim_lock = threading.Lock()
+        self.batch_start_id: int | None = None   # first job of the current run of downloads (for the overall progress bar)
+        self.last_batch: dict | None = None      # how the last run ended: {total, done, failed, at}
+        self.batch_old_ids: set[int] = set()     # older jobs retried during this run (ids below batch_start_id)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -144,6 +147,45 @@ class DownloadManager:
     def wake(self):
         with self.cond:
             self.cond.notify_all()
+
+    # ------------------------------------------------------------ overall progress
+
+    def batch(self, conn) -> dict | None:
+        """Progress of the current run of downloads: every job since the queue was last empty.
+        -> {total, done, failed, running, fraction}, or None when nothing is queued or running."""
+        active = conn.execute("SELECT min(id) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
+        if active is None:
+            if self.batch_start_id is not None:
+                # The run just ended: remember how it went so the header can say so once.
+                done, failed = self._batch_counts(conn)
+                if done or failed:
+                    self.last_batch = {"total": done + failed, "done": done, "failed": failed, "at": time.time()}
+                self.batch_start_id = None
+                self.batch_old_ids = set()
+            return None
+        if self.batch_start_id is None:
+            self.batch_start_id = active
+        rows = conn.execute(
+            "SELECT j.id, j.status, j.progress, j.stage, t.title, t.artists FROM jobs j JOIN tracks t ON t.id = j.track_id "
+            "WHERE j.status IN ('queued', 'running') ORDER BY j.id").fetchall()
+        self.batch_old_ids |= {r["id"] for r in rows if r["id"] < self.batch_start_id}
+        done, failed = self._batch_counts(conn)
+        running = [{"title": r["title"], "artists": r["artists"], "stage": r["stage"] or "starting",
+                    # converting / tagging come after the download itself, so that song is as good as done
+                    "progress": 1.0 if r["stage"] in ("converting", "tagging") else float(r["progress"] or 0)}
+                   for r in rows if r["status"] == "running"]
+        total = done + failed + len(rows)
+        fraction = (done + failed + sum(r["progress"] for r in running)) / total if total else 0.0
+        return {"total": total, "done": done, "failed": failed, "queued": len(rows) - len(running),
+                "running": running, "fraction": round(min(fraction, 1.0), 4)}
+
+    def _batch_counts(self, conn) -> tuple[int, int]:
+        old = sorted(self.batch_old_ids)
+        row = conn.execute(
+            "SELECT coalesce(sum(status = 'done'), 0), coalesce(sum(status = 'failed'), 0) FROM jobs "
+            f"WHERE (id >= ? OR id IN ({','.join('?' * len(old)) or 'NULL'})) AND status IN ('done', 'failed')",
+            (self.batch_start_id, *old)).fetchone()
+        return int(row[0]), int(row[1])
 
     # ------------------------------------------------------------ public API
 

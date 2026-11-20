@@ -135,3 +135,47 @@ def test_convert_is_constant_bitrate_192(dm, tmp_path):
     dm._set_job = lambda *a, **k: None
     info = MP3(dm._convert(1, src, tmp_path / "audio.mp3", ffdir)).info
     assert abs(info.bitrate - 192000) < 1000 and info.bitrate_mode != BitrateMode.VBR
+
+
+def _job(conn, tid, status, progress=0.0, stage=""):
+    return conn.execute("INSERT INTO jobs (track_id, status, progress, stage) VALUES (?, ?, ?, ?)", (tid, status, progress, stage)).lastrowid
+
+
+def test_overall_progress_counts_the_current_run(dm, lib):
+    conn, tid = add_track(lib)
+    _job(conn, tid, "done")                       # from an earlier run: not counted
+    assert dm.batch(conn) is None and dm.last_batch is None
+    first = _job(conn, tid, "running", 0.5, "downloading")
+    _job(conn, tid, "queued")
+    b = dm.batch(conn)
+    assert (b["total"], b["done"], b["queued"]) == (2, 0, 1) and b["fraction"] == 0.25
+    assert b["running"][0]["title"] == "Strobe" and b["running"][0]["progress"] == 0.5
+    conn.execute("UPDATE jobs SET status = 'done' WHERE id = ?", (first,))
+    _job(conn, tid, "queued")                     # added mid-way: the total grows
+    b = dm.batch(conn)
+    assert (b["total"], b["done"]) == (3, 1) and round(b["fraction"], 3) == 0.333
+    conn.execute("UPDATE jobs SET status = 'running', stage = 'converting' WHERE status = 'queued' AND id = (SELECT min(id) FROM jobs WHERE status = 'queued')")
+    assert dm.batch(conn)["fraction"] == round(2 / 3, 4)   # converting counts as downloaded
+    conn.execute("UPDATE jobs SET status = 'done' WHERE status = 'running'")
+    conn.execute("UPDATE jobs SET status = 'failed' WHERE status = 'queued'")
+    assert dm.batch(conn) is None
+    assert {k: dm.last_batch[k] for k in ("total", "done", "failed")} == {"total": 3, "done": 2, "failed": 1}
+
+
+def test_overall_progress_includes_retried_old_jobs(dm, lib):
+    conn, tid = add_track(lib)
+    old = _job(conn, tid, "failed")
+    _job(conn, tid, "queued")
+    conn.execute("UPDATE jobs SET status = 'queued' WHERE id = ?", (old,))   # retried
+    assert dm.batch(conn)["total"] == 2
+    conn.execute("UPDATE jobs SET status = 'done' WHERE id = ?", (old,))
+    assert dm.batch(conn)["total"] == 2 and dm.batch(conn)["done"] == 1     # still counted once done
+
+
+def test_status_reports_overall_progress(client, lib):
+    from djcrate.api import downloads
+    downloads.batch_start_id, downloads.last_batch, downloads.batch_old_ids = None, None, set()
+    conn, tid = add_track(lib)
+    _job(conn, tid, "queued")
+    q = client.get("/api/status").json()["queue"]
+    assert q["batch"]["total"] == 1 and q["last_batch"] is None

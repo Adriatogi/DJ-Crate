@@ -27,6 +27,9 @@ let lastRekordboxAt;
 let lastLookedUp;
 let lastGenreRefresh = 0;
 let lastCleanFlagAt;
+let shownBatchEnd;   // the finished run we've already shown (by its time); set on the first poll
+let batchEndTimer = null;
+let batchEndShowing = false;
 let lastCleanNotice = 0;
 let cleanSeen = 0;
 let pendingTrackRefresh = false;
@@ -87,6 +90,7 @@ async function poll() {
     showStartup(s);
   }
   renderStrip(s);
+  renderProgress(s);
   renderBanners(s);
   if (libStatus === "ok") {
     const q = s.queue;
@@ -174,6 +178,48 @@ async function announceClean(cf, found) {
     timeout: 12000,
     action: { label: "Swap to explicit", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await swapVersion([r.track], "explicit"); } },
   });
+}
+
+// ------------------------------------------------ overall download progress
+
+const PAUSED = {
+  ffmpeg_missing: "ffmpeg is missing", library_missing: "library folder not reachable", disk_full: "disk is full",
+  offline: "you're offline", rate_limited: "YouTube is rate-limiting",
+};
+
+function renderProgress(s) {
+  const el = document.getElementById("dl-progress");
+  const b = s.library?.status === "ok" ? s.queue?.batch : null;
+  const bar = (fraction, cls = "") => h("div", { class: `progress ${cls}` }, h("div", { style: { width: `${Math.round(fraction * 100)}%` } }));
+  if (b) {
+    clearTimeout(batchEndTimer);
+    batchEndShowing = false;
+    const paused = s.queue.paused_reason;
+    const text = paused
+      ? `Paused: ${PAUSED[paused] || paused.replace(/_/g, " ")}`
+      : `${b.done}/${b.total} downloaded${b.failed ? ` · ${b.failed} failed` : ""}`;
+    el.title = [...b.running.map((r) => `${r.title} — ${r.artists} · ${r.stage === "downloading" ? `${Math.round(r.progress * 100)}%` : r.stage}`),
+      b.queued ? `${b.queued} waiting` : null, b.failed ? `${b.failed} failed` : null, "Click for details"].filter(Boolean).join("\n");
+    el.className = paused ? "paused" : b.failed ? "failed" : "";
+    fill(el, bar(b.total ? b.done / b.total : 0), h("span", {}, text));   // simple: songs finished out of the total
+    el.hidden = false;
+    return;
+  }
+  // The run just finished: say how it went for a few seconds, once.
+  const last = s.queue?.last_batch;
+  if (shownBatchEnd === undefined) shownBatchEnd = last?.at ?? null;   // don't replay an old run after a reload
+  if (last && last.at !== shownBatchEnd) {
+    shownBatchEnd = last.at;
+    el.className = last.failed ? "failed" : "finished";
+    el.title = last.failed ? "Click to see what failed" : "";
+    fill(el, bar(1), h("span", {}, last.failed ? `Downloaded ${last.done} · ${last.failed} failed` : `Downloaded ${last.done} ✓`));
+    el.hidden = false;
+    clearTimeout(batchEndTimer);
+    batchEndShowing = true;
+    batchEndTimer = setTimeout(() => { batchEndShowing = false; el.hidden = true; }, last.failed ? 12000 : 6000);
+    return;
+  }
+  if (!batchEndShowing) el.hidden = true;
 }
 
 // ------------------------------------------------ status strip & banners
@@ -464,6 +510,7 @@ function toggleActivity(force) {
 function init() {
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   document.getElementById("activity-btn").addEventListener("click", () => toggleActivity());
+  document.getElementById("dl-progress").addEventListener("click", (e) => { e.stopPropagation(); toggleActivity(true); });
   document.addEventListener("mousedown", (e) => {
     const panel = document.getElementById("activity-panel");
     if (!panel.hidden && !panel.contains(e.target) && !document.getElementById("activity-btn").contains(e.target)) toggleActivity(false);

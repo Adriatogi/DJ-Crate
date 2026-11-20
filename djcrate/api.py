@@ -140,6 +140,8 @@ def status():
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
                 "SELECT count(*) FROM jobs WHERE status = 'failed' AND error_code = 'ytdlp_outdated'").fetchone()[0]
+            out["queue"]["batch"] = downloads.batch(conn)
+            out["queue"]["last_batch"] = downloads.last_batch
             if not out["queue"]["queued"]:
                 downloads.paused_reason = None
                 out["queue"]["paused_reason"] = None

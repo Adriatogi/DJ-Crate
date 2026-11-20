@@ -669,3 +669,18 @@ button.gchip.unknown, button.gchip.artist { border-style: dashed; }
 .clean-tag:hover { color: var(--text); }
 .find .result .clean-note { color: var(--muted); }
 .find .use-explicit { display: inline-block; margin-top: 4px; font-size: 11px; color: var(--accent-2); text-decoration: underline; cursor: pointer; }
+
+/* Overall download progress in the header (click for Activity) */
+#dl-progress {
+  display: flex; align-items: center; gap: 8px; margin-right: 8px; padding: 3px 10px;
+  border-radius: 999px; background: var(--bg-3, var(--bg-4)); font-size: 12px; color: var(--muted);
+  cursor: pointer; white-space: nowrap;
+}
+#dl-progress[hidden] { display: none; }
+#dl-progress .progress { width: 140px; height: 6px; border-radius: 3px; }
+#dl-progress.finished { color: var(--green, var(--text)); }
+#dl-progress.finished .progress > div { background: var(--green, var(--accent)); }
+#dl-progress.failed { color: var(--red); }
+#dl-progress.failed .progress > div { background: var(--red); }
+#dl-progress.paused { color: var(--yellow); }
+#dl-progress.paused .progress > div { background: var(--yellow); }
