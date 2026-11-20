@@ -5,7 +5,7 @@ import { emit, findCrate, store } from "./store.js";
 import { confirmDialog, errorToast, h, menu, promptDialog, toast } from "./ui.js";
 
 const SMART_ICONS = {
-  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!", clean_versions: "Ⓔ",
+  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!", clean_versions: "🔇",
 };
 
 const collapsed = new Set(JSON.parse(localStorage.getItem("djc.collapsed") || "[]"));

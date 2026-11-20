@@ -92,7 +92,8 @@ def test_check_results(ytm):
     url = lambda v: f"https://www.youtube.com/watch?v={v}"
     clean = ytmusic.check({"source_url": url(CLEAN), "title": "The Percocet & Stripper Joint", "artists": "Future"})
     assert clean["result"] == "clean" and clean["twin"]["video_id"] == EXPL and clean["twin"]["album"] == "DS2 (Deluxe)"
-    assert ytmusic.check({"source_url": url(EXPL)})["result"] == "explicit"
+    expl = ytmusic.check({"source_url": url(EXPL)})
+    assert expl["result"] == "explicit" and expl["clean_twin"]["video_id"] == CLEAN  # both copies are known
     assert ytmusic.check({"source_url": url(OTHER)})["result"] == "unofficial"   # a user upload: never flagged
     assert ytmusic.check({"source_url": url("aaaaaaaaaaa")})["result"] == "unknown"
     assert ytmusic.check({"source_url": "https://soundcloud.com/x/y"})["result"] == "unknown"
@@ -130,41 +131,39 @@ def test_checker_flags_swap_and_keep(client, lib, ytm):
     smart = {s["key"]: s["count"] for s in client.get("/api/sidebar").json()["smart"]}
     assert smart["clean_versions"] == 1
 
-    # Keep: no longer flagged, undo brings it back.
-    assert client.put(f"/api/tracks/{tid}/clean_keep", json={"keep": True}).json()["track"]["clean_flag"] is False
-    assert client.get("/api/tracks?view=smart:clean_versions").json()["tracks"] == []
-    assert client.put(f"/api/tracks/{tid}/clean_keep", json={"keep": False}).json()["track"]["clean_flag"] is True
-
     # Swap: the link becomes the explicit copy, recorded as explicit, nothing left to check.
-    r = client.post("/api/tracks/swap_explicit", json={"ids": [tid]}).json()
+    r = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "explicit"}).json()
     assert r["swapped"] == 1 and r["queued"] == 0  # not downloaded yet, so nothing to re-download
     t = r["tracks"][0]
     assert t["source_url"] == ytmusic.watch_url(EXPL) and t["clean"]["result"] == "explicit" and not t["clean_flag"]
+    assert t["clean"]["clean_twin"]["video_id"] == CLEAN  # the way back
     assert checker.step() is False
-    assert client.post("/api/tracks/swap_explicit", json={"ids": [tid]}).json()["swapped"] == 0  # not flagged anymore
+    assert client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "explicit"}).json()["swapped"] == 0  # already explicit
+    # ...and back to clean (some gigs want clean)
+    t = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "clean"}).json()["tracks"][0]
+    assert t["source_url"] == ytmusic.watch_url(CLEAN) and t["clean_flag"] and t["clean"]["twin"]["video_id"] == EXPL
 
 
 def test_swap_redownloads_downloaded_songs(client, lib, ytm):
     tid = add(client, f"https://youtu.be/{CLEAN}")
     lib.conn().execute("UPDATE tracks SET download_status = 'done', file_rel_path = 'x.mp3' WHERE id = ?", (tid,))
     cleancheck.Checker(lib).step()
-    r = client.post("/api/tracks/swap_explicit", json={"ids": [tid]}).json()
+    r = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "explicit"}).json()
     assert r["queued"] == 1
     job = lib.conn().execute("SELECT replace_file FROM jobs WHERE track_id = ?", (tid,)).fetchone()
     assert job["replace_file"] == 1
 
 
-def test_link_change_makes_it_due_again_and_resets_keep(client, lib, ytm):
+def test_link_change_makes_it_due_again(client, lib, ytm):
     tid = add(client, f"https://youtu.be/{CLEAN}")
     checker = cleancheck.Checker(lib)
     checker.step()
-    client.put(f"/api/tracks/{tid}/clean_keep", json={"keep": True})
     client.patch(f"/api/tracks/{tid}", json={"source_url": f"https://www.youtube.com/watch?v={OTHER}"})
     t = client.get(f"/api/tracks/{tid}").json()["track"]
     assert t["clean"] is None and not t["clean_flag"]  # the old check was for the old link
     assert checker.step() is True
     t = client.get(f"/api/tracks/{tid}").json()["track"]
-    assert t["clean"]["result"] == "unofficial" and t["clean_keep"] is False
+    assert t["clean"]["result"] == "unofficial"
 
 
 def test_unreachable_pauses_checker(client, lib):
@@ -226,7 +225,7 @@ def test_user_uploads_are_never_flagged(client, lib, ytm, monkeypatch):
     t = client.get(f"/api/tracks/{tid}").json()["track"]
     assert t["clean"]["result"] == "unofficial" and not t["clean_flag"]
     assert client.get("/api/tracks?view=smart:clean_versions").json()["tracks"] == []
-    out = client.post("/api/tracks/swap_explicit", json={"ids": [tid]}).json()  # you can still choose the official copy
+    out = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "explicit"}).json()  # you can still choose the official copy
     assert out["swapped"] == 1 and out["tracks"][0]["source_url"] == ytmusic.watch_url(EXPL)
 
 
@@ -259,3 +258,13 @@ def test_search_ahead_preloads_youtube_music(client, lib, ytm, monkeypatch):
     client.get(f"/api/tracks/{tid}/yt_search")
     clean = client.get(f"/api/tracks/{tid}/yt_search/clean").json()["clean"]
     assert ytm == ["search"] and list(clean.values())[0]["video_id"] == EXPL  # ...so marking needed no new request
+
+
+def test_explicit_song_can_swap_to_clean(client, lib, ytm):
+    tid = add(client, ytmusic.watch_url(EXPL))
+    cleancheck.Checker(lib).step()
+    t = client.get(f"/api/tracks/{tid}").json()["track"]
+    assert t["clean"]["result"] == "explicit" and not t["clean_flag"] and t["clean"]["clean_twin"]["video_id"] == CLEAN
+    t = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "clean"}).json()["tracks"][0]
+    assert t["source_url"] == ytmusic.watch_url(CLEAN) and t["clean_flag"]
+    assert client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "sideways"}).json()["error"]["code"] == "bad_request"

@@ -2,7 +2,7 @@
 // multi-select (checkboxes only — no Shift-click ranges) and bulk actions.
 
 import { get, native, patch, post } from "./api.js";
-import { cleanBadge, findTag, swapExplicit } from "./cleanver.js";
+import { cleanBadge, findTag, otherCopy, swapVersion } from "./cleanver.js";
 import { genreControl, openBulkGenre } from "./genrepicker.js";
 import { drag } from "./sidebar.js";
 import { LINK_RE, emit, flatCrates, findCrate, on, store } from "./store.js";
@@ -347,12 +347,15 @@ function renderBulkbar() {
   };
   const genreBtn = h("button", { class: "btn small" }, "Genre ▾");
   genreBtn.onclick = () => openBulkGenre(genreBtn, ids);
-  const flagged = store.tracks.filter((t) => selected.has(t.id) && t.clean_flag);
+  const picked = store.tracks.filter((t) => selected.has(t.id));
+  const toExplicit = picked.filter((t) => otherCopy(t)?.to === "explicit");
+  const toClean = picked.filter((t) => otherCopy(t)?.to === "clean");
   fill(bar,
     h("span", { class: "count" }, `${ids.length} selected`),
     addBtn, genreBtn,
     h("button", { class: "btn small", onclick: () => startDownloads(ids) }, "⬇ Download"),
-    flagged.length ? h("button", { class: "btn small", onclick: () => swapExplicit(flagged) }, `Swap ${flagged.length} to explicit`) : null,
+    toExplicit.length ? h("button", { class: "btn small", onclick: () => swapVersion(toExplicit, "explicit") }, `Swap ${toExplicit.length} to explicit`) : null,
+    toClean.length ? h("button", { class: "btn small", onclick: () => swapVersion(toClean, "clean") }, `Swap ${toClean.length} to clean`) : null,
     inCrate ? h("button", { class: "btn small", onclick: () => removeFromCrate(ids) }, "Remove from crate") : null,
     h("button", { class: "btn small danger", onclick: () => deleteFromLibrary(ids) }, "Delete from library…"),
     h("div", { class: "spacer" }),

@@ -306,8 +306,8 @@ MIGRATIONS.append(  # v10: clean-version check (YouTube Music's explicit badge) 
 
 SCHEMA_VERSION = len(MIGRATIONS)
 
-# A clean copy of a song YouTube Music has as explicit, checked for the song's current link, and not kept on purpose.
-CLEAN_SQL = ("(t.clean_url IS NOT NULL AND t.clean_url = t.source_url AND t.clean_keep = 0 "
+# The song's current link is the clean copy of a song YouTube Music also has as explicit.
+CLEAN_SQL = ("(t.clean_url IS NOT NULL AND t.clean_url = t.source_url "
              "AND json_extract(t.clean_check, '$.result') = 'clean')")
 
 CHECK_VERSION_SQL = (
@@ -495,8 +495,8 @@ def track_to_dict(row) -> dict:
         raw = d.pop("clean_check")
         current = bool(raw) and d.get("clean_url") and d.get("clean_url") == d.get("source_url")
         d["clean"] = json.loads(raw) if current else None
-        d["clean_keep"] = bool(d.get("clean_keep"))
-        d["clean_flag"] = bool(d["clean"] and d["clean"].get("result") == "clean" and not d["clean_keep"])
+        d.pop("clean_keep", None)   # no longer used (labels are neutral, nothing to dismiss)
+        d["clean_flag"] = bool(d["clean"] and d["clean"].get("result") == "clean")
     return d
 
 

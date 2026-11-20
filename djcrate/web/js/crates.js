@@ -1,6 +1,6 @@
 // Crates tab controller: which view is selected, toolbar, loading data.
 
-import { swapExplicit } from "./cleanver.js";
+import { swapVersion } from "./cleanver.js";
 import { get, post } from "./api.js";
 import { autoRelocate, initImporters } from "./importers.js";
 import { closeDetail, initDetail } from "./detail.js";
@@ -193,7 +193,7 @@ export function initCrates() {
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;
   document.getElementById("btn-resync").onclick = () => emit("resync", Number(store.view.split(":")[1]));
-  document.getElementById("btn-swap-all").onclick = () => swapExplicit(store.tracks.filter((t) => t.clean_flag));
+  document.getElementById("btn-swap-all").onclick = () => swapVersion(store.tracks.filter((t) => t.clean_flag), "explicit");
   const more = document.getElementById("btn-view-menu");
   more.onclick = () => viewMenu(more);
   const sortBtn = document.getElementById("btn-sort");

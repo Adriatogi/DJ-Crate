@@ -34,12 +34,11 @@ def due_count(conn) -> int:
 
 
 def store(conn, track: dict, result: dict) -> None:
-    """Save a check for the link it was made for. A new link resets "keep this one"."""
+    """Save a check for the link it was made for."""
     with db.tx(conn):
         conn.execute(
-            "UPDATE tracks SET clean_check = ?, clean_checked_at = ?, "
-            "clean_keep = CASE WHEN clean_url = ? THEN clean_keep ELSE 0 END, clean_url = ? WHERE id = ?",
-            (json.dumps(result), result.get("checked_at", time.time()), track["source_url"], track["source_url"], track["id"]))
+            "UPDATE tracks SET clean_check = ?, clean_checked_at = ?, clean_url = ? WHERE id = ?",
+            (json.dumps(result), result.get("checked_at", time.time()), track["source_url"], track["id"]))
 
 
 def check_track(conn, track: dict, cl=None) -> dict:

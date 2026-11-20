@@ -2,7 +2,7 @@
 // screens, Activity panel, keyboard shortcuts.
 
 import { get, native, post } from "./api.js";
-import { keepClean, swapExplicit } from "./cleanver.js";
+import { swapVersion } from "./cleanver.js";
 import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
@@ -161,20 +161,18 @@ function promptInterrupted(n) {
   });
 }
 
+// Just information (some gigs want clean): say what was found, with a swap one click away.
 async function announceClean(cf, found) {
   if (found > 1) {
-    toast(`Found ${found} clean versions of explicit songs.`, {
-      type: "warn", timeout: 15000,
+    toast(`${found} songs are clean versions. YouTube Music also has them as explicit.`, {
+      timeout: 12000,
       action: { label: "Show them", fn: () => { emit("show-tab", "crates"); selectView("smart:clean_versions"); } },
     });
     return;
   }
-  toast(`“${cf.title}” is the clean version. YouTube Music has the explicit one.`, {
-    type: "warn", timeout: 15000,
-    actions: [
-      { label: "Swap to explicit", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await swapExplicit([r.track]); } },
-      { label: "Keep", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await keepClean(r.track, true); } },
-    ],
+  toast(`“${cf.title}” is the clean version. YouTube Music also has the explicit one.`, {
+    timeout: 12000,
+    action: { label: "Swap to explicit", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await swapVersion([r.track], "explicit"); } },
   });
 }
 

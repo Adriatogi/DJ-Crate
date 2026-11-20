@@ -40,7 +40,7 @@ GAP_S = 1.5              # between any two requests
 LENGTH_TOLERANCE_MS = 5000
 CLOSE_LENGTH_MS = 2000   # when the artist names differ (e.g. "$uede" vs "MoneySign Suede"), the length must be this close
 SEARCH_CACHE_S = 7 * 86400
-RULES = 2   # bump when the check changes, so every song is checked again under the new rules
+RULES = 3   # bump when the check changes, so every song is checked again under the new rules
 
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -245,7 +245,9 @@ def same_song(a: dict, b: dict, length_ms: int | None) -> bool:
 
 
 def check(track: dict, cl: Client | None = None) -> dict:
-    """-> {result, video_id, twin?, official, checked_at, v}. result: explicit | clean | unofficial | no_explicit | unknown.
+    """-> {result, video_id, twin?, clean_twin?, official, checked_at, v}.
+    result: explicit | clean | unofficial | no_explicit | unknown.
+    twin = the explicit copy (for clean / unofficial); clean_twin = the clean copy (for explicit songs that have one).
     Raises YTMError when YouTube Music is unreachable (the caller tries again later)."""
     cl = cl or client()
     now = time.time()
@@ -256,24 +258,31 @@ def check(track: dict, cl: Client | None = None) -> dict:
     if not me:
         return {"result": "unknown", "reason": "not_found", "video_id": vid, "checked_at": now, "v": RULES}
     base = {"video_id": vid, "official": me["official"], "checked_at": now, "v": RULES}
-    if me["explicit"]:
-        return {"result": "explicit", **base}
     length = me["duration_ms"] or track.get("file_duration_ms") or track.get("duration_ms")
     title = track.get("title") or me["title"]
     artists = track.get("artists") or me["artists"]
     rows = search_songs(find_query({"title": title, "artists": artists}), cl)
-    want = {"title": title, "artists": artists}
-    twin = next((r for r in rows if r["explicit"] and r["video_id"] != vid and same_song(want, r, length)), None)
-    if not twin and me["title"] and db.normalize(me["title"]) != db.normalize(title):
-        want = {"title": me["title"], "artists": me["artists"] or artists}
-        twin = next((r for r in rows if r["explicit"] and r["video_id"] != vid and same_song(want, r, length)), None)
-    twin_info = {k: twin[k] for k in ("video_id", "title", "artists", "album", "duration_ms")} if twin else None
+
+    def find(explicit: bool):
+        """The other copy of this song: same title and length, the given explicit-ness, not this video."""
+        for want in ({"title": title, "artists": artists}, {"title": me["title"], "artists": me["artists"] or artists}):
+            if not want["title"]:
+                continue
+            hit = next((r for r in rows if r["explicit"] == explicit and r["video_id"] != vid and same_song(want, r, length)), None)
+            if hit:
+                return {k: hit[k] for k in ("video_id", "title", "artists", "album", "duration_ms")}
+        return None
+
+    if me["explicit"]:
+        clean = find(False)
+        return {"result": "explicit", **base, **({"clean_twin": clean} if clean else {})}
+    twin_info = find(True)
     if not me["official"]:
         # A user upload or music video: YouTube Music can't say which version it is, so never flag it.
         # If an official explicit copy exists, the song card offers it.
         return {"result": "unofficial", **base, **({"twin": twin_info} if twin_info else {})}
-    if twin:
-        # An official album track without the E badge, and an E copy of the same song exists: the clean edit.
+    if twin_info:
+        # An official album track not marked explicit, and an explicit copy of the same song exists: the clean edit.
         return {"result": "clean", **base, "twin": twin_info}
     return {"result": "no_explicit", **base}
 

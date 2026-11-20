@@ -705,37 +705,44 @@ def clean_check_now(track_id: int, conn=Depends(get_conn)):
     return {"track": db.get_track(conn, track_id)}
 
 
-class CleanKeepBody(BaseModel):
-    keep: bool
+class SwapBody(BaseModel):
+    ids: list[int]
+    to: str = "explicit"   # or "clean"
 
 
-@app.put("/api/tracks/{track_id}/clean_keep")
-def clean_keep(track_id: int, body: CleanKeepBody, conn=Depends(get_conn)):
-    if not db.get_track(conn, track_id):
-        raise AppError("not_found", "That song doesn't exist anymore.", 404)
-    with db.tx(conn):
-        conn.execute("UPDATE tracks SET clean_keep = ? WHERE id = ?", (int(body.keep), track_id))
-    return {"track": db.get_track(conn, track_id)}
+def _other_copy(t: dict, to: str) -> dict | None:
+    """The copy to swap to, if the song has one."""
+    check = (t or {}).get("clean") or {}
+    if to == "explicit" and check.get("result") in ("clean", "unofficial"):
+        return check.get("twin")   # clean edits, and user uploads where you chose the official explicit copy
+    if to == "clean" and check.get("result") == "explicit":
+        return check.get("clean_twin")
+    return None
 
 
-@app.post("/api/tracks/swap_explicit")
-def swap_explicit(body: IdsBody, conn=Depends(get_conn)):
-    """Point each flagged song at its explicit twin and re-download songs that already have a file.
-    Same file path, so Rekordbox keeps its link (as with any re-download)."""
+@app.post("/api/tracks/swap_version")
+def swap_version(body: SwapBody, conn=Depends(get_conn)):
+    """Point each song at its explicit (or clean) copy on YouTube Music and re-download songs that already
+    have a file. Same file path, so Rekordbox keeps its link (as with any re-download)."""
+    if body.to not in ("explicit", "clean"):
+        raise AppError("bad_request", "Swap to explicit or clean.")
     swapped, to_download = [], []
     with db.tx(conn):
         for tid in body.ids:
             t = db.get_track(conn, tid)
-            check = (t or {}).get("clean") or {}
-            # Clean edits, and user uploads where you chose the official explicit copy.
-            twin = check.get("twin") if check.get("result") in ("clean", "unofficial") else None
-            if not twin:
+            target = _other_copy(t, body.to)
+            if not target:
                 continue
-            url = ytmusic.watch_url(twin["video_id"])
-            # We already know the twin has the E badge, so record that instead of checking it again.
-            result = {"result": "explicit", "video_id": twin["video_id"], "official": True, "checked_at": time.time(),
+            url = ytmusic.watch_url(target["video_id"])
+            mine = (t["clean"] or {}).get("video_id")
+            mine_info = {"video_id": mine, "title": t["title"], "artists": t["artists"],
+                         "album": None, "duration_ms": t.get("file_duration_ms") or t.get("duration_ms")} if mine else None
+            # We already know what the other copy is, so record it (with a way back) instead of checking again.
+            result = {"result": body.to, "video_id": target["video_id"], "official": True, "checked_at": time.time(),
                       "swapped_from": t["source_url"], "v": ytmusic.RULES}
-            conn.execute("UPDATE tracks SET source_url = ?, clean_url = ?, clean_check = ?, clean_checked_at = ?, clean_keep = 0, "
+            if mine_info and (t["clean"] or {}).get("official"):
+                result["twin" if body.to == "clean" else "clean_twin"] = mine_info
+            conn.execute("UPDATE tracks SET source_url = ?, clean_url = ?, clean_check = ?, clean_checked_at = ?, "
                          "updated_at = datetime('now') WHERE id = ?", (url, url, json.dumps(result), result["checked_at"], tid))
             swapped.append(tid)
             if t["download_status"] in ("done", "missing", "error"):

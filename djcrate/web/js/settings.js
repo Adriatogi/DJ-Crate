@@ -111,7 +111,7 @@ export async function showSettings() {
     try { await put("/api/clean/check", { on: cvToggle.checked }); emit("poll"); setTimeout(showSettings, 300); } catch (e) { errorToast(e); }
   });
   const cleanCard = card("Clean versions",
-    h("p", {}, "YouTube Music lists many albums twice: once with an ", h("b", {}, "E"), " (explicit) badge and once without. When a song's YouTube link is the copy without it, and an explicit copy of the same song exists, the song gets a red struck-through ", h("span", { class: "clean-e static" }, "E"), " and shows up in ", h("b", {}, "Clean Versions"), ". You choose: swap to the explicit one, or keep it."),
+    h("p", {}, "YouTube Music lists many albums twice: once marked explicit and once not. DJ Crate checks which copy each song's YouTube link is. Clean copies get a grey ", h("b", {}, "Clean"), " label and show up in ", h("b", {}, "Clean Versions"), ". Nothing is changed for you: swap to the explicit (or clean) copy from the label or the song card."),
     h("label", { class: "row gap", style: { cursor: "pointer" } }, cvToggle, "Check songs' YouTube links on YouTube Music in the background"),
     cv.on ? h("p", {}, cv.paused_until
       ? "⏸ YouTube Music is busy or unreachable — trying again in a few minutes."
@@ -120,7 +120,7 @@ export async function showSettings() {
         : `Checked ${cv.linked} song${cv.linked === 1 ? "" : "s"} with a YouTube link. ` +
           `${cv.flagged ? `${cv.flagged} clean version${cv.flagged === 1 ? "" : "s"} found.` : "No clean versions found."}` +
           (cv.songs > cv.linked ? ` ${cv.songs - cv.linked} song${cv.songs - cv.linked === 1 ? " doesn't" : "s don't"} have a link yet; they're checked once they get one.` : "")) : null,
-    h("p", { class: "muted small" }, "Only official YouTube Music tracks can be checked. User uploads and music videos are never flagged (their song card offers the official explicit copy if there is one). Re-recorded “radio” lines can't be told apart by any check, so give a new song a listen anyway."));
+    h("p", { class: "muted small" }, "Only official YouTube Music tracks can be checked. User uploads and music videos get no label (their song card offers the official explicit copy if there is one). Re-recorded “radio” lines can't be told apart by any check, so give a new song a listen anyway."));
 
   // ---- Library
   const libName = h("input", { value: s.library_name, style: { width: "260px" } });
