@@ -104,6 +104,24 @@ export async function showSettings() {
       : gl.pending ? `Looking up songs… ${gl.looked_up} done, ${gl.pending} to go.` : `All songs looked up (${gl.found} had suggestions).`) : null,
     h("p", { class: "muted small" }, "Suggestions are faint chips in a song's Genre cell (one click to use) and in its [+] dropdown. Nothing is applied until you click one. MusicBrainz knows many songs only by their artist's genres (shown with a dashed outline), and some not at all. Songs that already have a genre in Rekordbox or their MP3 are skipped."));
 
+  // ---- Clean versions
+  const cv = store.status?.clean || {};
+  const cvToggle = h("input", { type: "checkbox", class: "sel", checked: !!cv.on });
+  cvToggle.addEventListener("change", async () => {
+    try { await put("/api/clean/check", { on: cvToggle.checked }); emit("poll"); setTimeout(showSettings, 300); } catch (e) { errorToast(e); }
+  });
+  const cleanCard = card("Clean versions",
+    h("p", {}, "YouTube Music lists many albums twice: once with an ", h("b", {}, "E"), " (explicit) badge and once without. When a song's YouTube link is the copy without it, and an explicit copy of the same song exists, the song gets a red struck-through ", h("span", { class: "clean-e static" }, "E"), " and shows up in ", h("b", {}, "Clean Versions"), ". You choose: swap to the explicit one, or keep it."),
+    h("label", { class: "row gap", style: { cursor: "pointer" } }, cvToggle, "Check songs' YouTube links on YouTube Music in the background"),
+    cv.on ? h("p", {}, cv.paused_until
+      ? "⏸ YouTube Music is busy or unreachable — trying again in a few minutes."
+      : cv.pending
+        ? `Checking… ${cv.checked} done, ${cv.pending} to go.`
+        : `Checked ${cv.linked} song${cv.linked === 1 ? "" : "s"} with a YouTube link. ` +
+          `${cv.flagged ? `${cv.flagged} clean version${cv.flagged === 1 ? "" : "s"} found.` : "No clean versions found."}` +
+          (cv.songs > cv.linked ? ` ${cv.songs - cv.linked} song${cv.songs - cv.linked === 1 ? " doesn't" : "s don't"} have a link yet; they're checked once they get one.` : "")) : null,
+    h("p", { class: "muted small" }, "Only official YouTube Music tracks can be checked. User uploads and music videos are never flagged (their song card offers the official explicit copy if there is one). Re-recorded “radio” lines can't be told apart by any check, so give a new song a listen anyway."));
+
   // ---- Library
   const libName = h("input", { value: s.library_name, style: { width: "260px" } });
   libName.addEventListener("change", async () => {
@@ -186,7 +204,7 @@ export async function showSettings() {
     h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")),
     h("p", { class: "muted small" }, `DJ Crate ${store.status?.version || ""}`));
 
-  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, genresCard, libraryCard, downloadsCard, backupsCard, troubleCard));
+  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, genresCard, cleanCard, libraryCard, downloadsCard, backupsCard, troubleCard));
 }
 
 export async function updateYtdlp(btn) {

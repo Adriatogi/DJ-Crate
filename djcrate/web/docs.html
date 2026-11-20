@@ -38,13 +38,24 @@
 <h2 id="crates">Crates</h2>
 <ul>
   <li><b>Spotify import and re-sync.</b> A playlist becomes a crate with every song's title, artists, album, cover and length. Songs removed on Spotify are kept, dimmed, with your notes and file. <b>↻ All</b> next to the import button re-syncs every Spotify crate in one go. When importing, tick <b>Hide already imported playlists</b> to see only the new ones.</li>
-  <li><b>Smart crates</b> fill themselves: Needs Link, Ready to Download, Downloaded, Check Version, Missing Files. You can also make your own crates and folders and drag songs into them.</li>
+  <li><b>Smart crates</b> fill themselves: Needs Link, Ready to Download, Downloaded, Check Version, Clean Versions, Missing Files. You can also make your own crates and folders and drag songs into them.</li>
   <li><b>Links.</b> Paste a YouTube link, or use <b>Find</b>. It highlights the result whose length matches Spotify's and warns about Radio Edit, Live, Sped up and similar. It searches the next few songs ahead so Find opens instantly.</li>
   <li><b>Downloads.</b> <code>Title - Artist.mp3</code>, constant 192 kbps, tagged with title, artists, album, year, ISRC, and cover art. The comment tag is left alone.</li>
   <li><b>Check Version.</b> A download more than 5 seconds off Spotify's length is probably a different version.</li>
   <li><b>BPM &amp; Key columns.</b> Sortable, filled from your Rekordbox export. Key shows both notations, like <code>8A · Am</code>.</li>
   <li><b>The song card</b> (click a cover, title or artist) holds notes, samples, metadata and file info. It is the same card everywhere in the app.</li>
   <li><b>Player.</b> ▶ previews a song under its row. Space plays and pauses.</li>
+</ul>
+
+<h2 id="clean">Clean versions</h2>
+<p>YouTube often serves the <b>clean</b> (radio) edit of a song without saying so in the title. YouTube Music lists many albums twice: once with an <b>E</b> (explicit) badge and once without. DJ Crate checks each song's YouTube link against that badge in the background.</p>
+<ul>
+  <li><b>A red struck-through <span class="clean-e static">E</span></b> next to a title means the link is the clean copy and YouTube Music has an explicit one of the same song (same title, same length). Hover it to see which. Songs that are fine show nothing.</li>
+  <li><b>Click it</b> to <b>Swap to the explicit version</b> (the link changes and the song downloads again to the same file, so Rekordbox keeps its link; check your cues and beatgrid) or <b>Keep this one</b> (stops flagging it; undo in the song card).</li>
+  <li><b>Clean Versions</b> in the smart crates lists every flagged song, with <b>Swap all to explicit</b>. You can also select songs and use <b>Swap to explicit</b> in the bar at the bottom.</li>
+  <li><b>Find</b> marks results that are the clean copy, with a link to use the explicit one instead.</li>
+  <li><b>What it can't tell.</b> Only official YouTube Music tracks have the badge, so user uploads and music videos aren't flagged. Listening to the audio alone can't reliably tell a clean edit (a few muted words look like ordinary pauses), and re-recorded radio lines can't be detected at all, so give a new song a listen anyway.</li>
+  <li>Turn it off under <b>Settings → Clean versions</b>.</li>
 </ul>
 
 <h2 id="genres">Genre Rack</h2>

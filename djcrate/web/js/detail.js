@@ -3,6 +3,7 @@
 // right panel (via songCard).
 
 import { patch, post } from "./api.js";
+import { cleanSection } from "./cleanver.js";
 import { genreControl } from "./genrepicker.js";
 import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
@@ -75,6 +76,7 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
     h("div", { class: "field" }, h("label", {}, "Genre"), genreControl(t, { onSaved, max: 6 }),
       t.genres.length ? h("div", { class: "muted small", style: { marginTop: "4px" } },
         `Written into the MP3 as “${t.genre_tag}”. In Rekordbox: right-click the song → Reload Tag.`) : null),
+    cleanSection(t),
     field("Notes", "notes", { multiline: true, placeholder: "Anything about this song — drop at 1:04, vocal comes in late, pairs well with…" }),
     samplesSection(t, { openSong, openTitle, onChange: onSamplesChange }),
     h("div", { class: "section-title" }, "Metadata"),

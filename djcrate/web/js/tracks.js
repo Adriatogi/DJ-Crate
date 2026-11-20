@@ -2,6 +2,7 @@
 // multi-select (checkboxes only — no Shift-click ranges) and bulk actions.
 
 import { get, native, patch, post } from "./api.js";
+import { cleanBadge, findTag, swapExplicit } from "./cleanver.js";
 import { genreControl, openBulkGenre } from "./genrepicker.js";
 import { drag } from "./sidebar.js";
 import { LINK_RE, emit, flatCrates, findCrate, on, store } from "./store.js";
@@ -98,6 +99,7 @@ function renderEmpty() {
       "smart:downloaded": "No downloads yet.",
       "smart:check_version": "No length mismatches — every download matches its Spotify length.",
       "smart:missing": "No missing files.",
+      "smart:clean_versions": "No clean versions found. Songs whose YouTube link is the clean copy of an explicit song show up here.",
     };
     content = [h("h3", {}, msgs[v] || "Nothing here")];
   }
@@ -132,7 +134,7 @@ function rowFor(t) {
     h("td", { class: "c-sel" }, sel),
     opens(h("td", { class: "c-cover", title: "Open song details" }, coverEl(t))),
     opens(h("td", { title: `${t.title}\nClick to open song details` },
-      h("div", { class: "t-title" }, t.title),
+      t.clean_flag ? h("div", { class: "t-title-row" }, h("div", { class: "t-title" }, t.title), cleanBadge(t)) : h("div", { class: "t-title" }, t.title),
       t.removed_from_source ? h("span", { class: "chip removed", title: "Removed from the Spotify playlist. Kept here with your notes and file." }, "Removed on Spotify") : null)),
     opens(h("td", { class: "artist", title: `${t.artists}\nClick to open song details` }, t.artists)),
     h("td", { class: "c-album muted", title: t.album }, t.album),
@@ -345,10 +347,12 @@ function renderBulkbar() {
   };
   const genreBtn = h("button", { class: "btn small" }, "Genre ▾");
   genreBtn.onclick = () => openBulkGenre(genreBtn, ids);
+  const flagged = store.tracks.filter((t) => selected.has(t.id) && t.clean_flag);
   fill(bar,
     h("span", { class: "count" }, `${ids.length} selected`),
     addBtn, genreBtn,
     h("button", { class: "btn small", onclick: () => startDownloads(ids) }, "⬇ Download"),
+    flagged.length ? h("button", { class: "btn small", onclick: () => swapExplicit(flagged) }, `Swap ${flagged.length} to explicit`) : null,
     inCrate ? h("button", { class: "btn small", onclick: () => removeFromCrate(ids) }, "Remove from crate") : null,
     h("button", { class: "btn small danger", onclick: () => deleteFromLibrary(ids) }, "Delete from library…"),
     h("div", { class: "spacer" }),
@@ -416,6 +420,7 @@ async function openFind(t, anchor, input) {
       if (!box.isConnected) return;
       renderFind(box, t, r, input, () => load(true));
       searchAhead(t);
+      markCleanResults(box, t, r, input);
     } catch (e) {
       if (!box.isConnected) return;
       fill(box,
@@ -427,6 +432,16 @@ async function openFind(t, anchor, input) {
     }
   };
   load();
+}
+
+// After Find shows its results, ask (behind the scenes) which are the clean copy of an
+// explicit song, and mark them. Find never waits for this.
+async function markCleanResults(box, t, r, input) {
+  let clean;
+  try { clean = (await get(`/api/tracks/${t.id}/yt_search/clean`)).clean; } catch { return; }
+  if (!box.isConnected || !Object.keys(clean).length) return;
+  r.results.forEach((res) => { res.clean_of = clean[res.url] || null; });
+  renderFind(box, t, r, input, () => {});
 }
 
 // Quietly search the next songs in on-screen order that still need a link, so
@@ -466,7 +481,17 @@ function renderFind(box, t, r, input, refresh) {
     },
       h("div", { class: "rt" }, res.title),
       h("div", { class: "rm" }, [res.channel, fmtMs(res.duration_ms)].filter(Boolean).join(" · "), lengthNote ? " · " : "", lengthNote),
-      res.flags.map((f) => h("div", { class: "flagline" }, "⚠ " + f)));
+      res.flags.map((f) => h("div", { class: "flagline" }, "⚠ " + f)),
+      findTag(res),
+      res.clean_of ? h("span", {
+        class: "use-explicit",
+        onclick: (e) => {
+          e.stopPropagation();
+          input.value = `https://www.youtube.com/watch?v=${res.clean_of.video_id}`;
+          input.dispatchEvent(new Event("change"));
+          closePopover();
+        },
+      }, "Use the explicit one instead") : null);
   });
   fill(box,
     h("div", { class: "head" }, `Results for “${r.query}” · Spotify length ${fmtMs(t.duration_ms)}. Pick the right one — green means the length matches.`),
@@ -567,6 +592,7 @@ export function resetTable() {
 }
 
 export function initTracks() {
+  on("track-changed", updateTrack);
   document.getElementById("select-all").addEventListener("change", (e) => {
     if (e.target.checked) store.tracks.forEach((t) => selected.add(t.id));
     else selected.clear();

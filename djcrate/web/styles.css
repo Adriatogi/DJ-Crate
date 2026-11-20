@@ -657,3 +657,19 @@ button.gchip.unknown, button.gchip.artist { border-style: dashed; }
 #rack-addfoot { flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); }
 #rack-addfoot[hidden] { display: none; }
 .btn.big { display: block; width: 100%; padding: 16px; font-size: 15px; font-weight: 700; border-radius: 10px; }
+
+/* Clean versions: a red struck-through E, shown only when a song is the clean copy of an explicit one */
+.t-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.t-title-row .t-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clean-e {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 3px; padding: 0;
+  background: var(--red); color: #fff; border: none;
+  font: 700 10px/1 system-ui, sans-serif; text-decoration: line-through; text-decoration-thickness: 2px;
+  cursor: pointer;
+}
+.clean-e:hover { filter: brightness(1.15); }
+.clean-e.static { cursor: default; vertical-align: -3px; }
+.clean-warn { color: var(--red); font-weight: 600; }
+.find .result .clean-line { color: var(--red); }
+.find .use-explicit { display: inline-block; margin-top: 4px; font-size: 11px; color: var(--accent-2); text-decoration: underline; cursor: pointer; }

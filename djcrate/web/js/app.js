@@ -2,6 +2,7 @@
 // screens, Activity panel, keyboard shortcuts.
 
 import { get, native, post } from "./api.js";
+import { keepClean, swapExplicit } from "./cleanver.js";
 import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
@@ -25,6 +26,9 @@ let searchPaused = false;
 let lastRekordboxAt;
 let lastLookedUp;
 let lastGenreRefresh = 0;
+let lastCleanFlagAt;
+let lastCleanNotice = 0;
+let cleanSeen = 0;
 let pendingTrackRefresh = false;
 
 // ------------------------------------------------ tabs
@@ -111,6 +115,19 @@ async function poll() {
         if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
       }
     }
+    // The background clean check found a clean version: say so once, with the choice right there.
+    // While it works through your existing songs, finds are summed up (at most one notice a minute).
+    const cf = s.clean?.last_flag;
+    if (lastCleanFlagAt === undefined) { lastCleanFlagAt = cf?.at ?? null; cleanSeen = s.clean?.flagged ?? 0; }
+    else if (cf && cf.at !== lastCleanFlagAt && Date.now() - lastCleanNotice > 60000) {
+      lastCleanFlagAt = cf.at;
+      lastCleanNotice = Date.now();
+      const found = Math.max(1, (s.clean.flagged ?? 0) - cleanSeen);
+      cleanSeen = s.clean.flagged ?? 0;
+      if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
+      emit("refresh-sidebar");
+      announceClean(cf, found);
+    }
     if (q.interrupted && !interruptedPrompted) promptInterrupted(q.interrupted);
   }
   const badge = document.getElementById("activity-count");
@@ -140,6 +157,23 @@ function promptInterrupted(n) {
     actions: [
       { label: "Resume", fn: async () => { await post("/api/jobs/interrupted", { resume: true }); poll(); } },
       { label: "Discard", fn: async () => { await post("/api/jobs/interrupted", { resume: false }); poll(); } },
+    ],
+  });
+}
+
+async function announceClean(cf, found) {
+  if (found > 1) {
+    toast(`Found ${found} clean versions of explicit songs.`, {
+      type: "warn", timeout: 15000,
+      action: { label: "Show them", fn: () => { emit("show-tab", "crates"); selectView("smart:clean_versions"); } },
+    });
+    return;
+  }
+  toast(`“${cf.title}” is the clean version. YouTube Music has the explicit one.`, {
+    type: "warn", timeout: 15000,
+    actions: [
+      { label: "Swap to explicit", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await swapExplicit([r.track]); } },
+      { label: "Keep", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await keepClean(r.track, true); } },
     ],
   });
 }

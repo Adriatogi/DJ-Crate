@@ -9,7 +9,7 @@ import threading
 import time
 from urllib.parse import quote_plus
 
-from . import tools
+from . import db, tools
 from .downloader import classify_error, friendly
 from .errors import AppError
 
@@ -193,6 +193,13 @@ class Prefetcher:
             try:
                 search(track, conn)
                 log.info("Searched ahead: %s", query_for(track))
+                if db.get_setting(conn, "clean_check_on", "1") == "1":
+                    # Also pre-load YouTube Music's answer, so Find can mark clean versions without waiting.
+                    from . import ytmusic
+                    try:
+                        ytmusic.search_songs(ytmusic.find_query(track))
+                    except ytmusic.YTMError as e:
+                        log.info("Couldn't pre-load YouTube Music for %s: %s", query_for(track), e)
             except RateLimited:
                 self.pause()
             except AppError as e:

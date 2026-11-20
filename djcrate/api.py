@@ -2,8 +2,10 @@
 so the UI can always show something useful."""
 
 import datetime as dt
+import json
 import logging
 import os
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, backup, cutting, db, genius, genre_lookup, genres, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search
+from . import __version__, backup, cleancheck, cutting, db, genius, genre_lookup, genres, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search, ytmusic
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -28,6 +30,7 @@ app = FastAPI(title="DJ Crate", docs_url=None, redoc_url=None)
 downloads = DownloadManager(state)
 search_ahead = yt_search.Prefetcher(state)
 genre_finder = genre_lookup.Finder(state)
+clean_checker = cleancheck.Checker(state)
 hooks: dict[str, Any] = {"focus": None}
 
 # Routes that must keep working in read-only mode / without a library.
@@ -132,6 +135,7 @@ def status():
             out["genius"]["configured"] = genius.configured(db.get_setting(conn, "library_id"))
             out["rekordbox"] = rekordbox.status(conn)
             out["genres"] = genre_lookup.status(conn, genre_finder)
+            out["clean"] = cleancheck.status(conn, clean_checker)
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
@@ -596,6 +600,8 @@ def add_track(body: NewTrack, conn=Depends(get_conn)):
             conn.execute("UPDATE tracks SET source_url = coalesce(nullif(source_url, ''), ?) WHERE id = ?", (url, tid))
         if body.crate_id:
             db.add_to_crate(conn, body.crate_id, [tid])
+    if url:
+        clean_checker.wake()
     return {"track": db.get_track(conn, tid), "created": created}
 
 
@@ -638,6 +644,8 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
             t = conn.execute("SELECT title, artists FROM tracks WHERE id = ?", (track_id,)).fetchone()
             conn.execute("UPDATE tracks SET norm_key = ? WHERE id = ?", (db.norm_key(t["title"], t["artists"]), track_id))
     updated = db.get_track(conn, track_id)
+    if changes.get("source_url"):
+        clean_checker.wake()
     if any(k in changes for k in TAG_FIELDS):
         warn = _write_file_tags(conn, updated, fetch_cover=False)
         if warn:
@@ -671,6 +679,81 @@ def retag(track_id: int, conn=Depends(get_conn)):
     if warn:
         raise AppError("tag_failed", warn)
     return {"track": db.get_track(conn, track_id)}
+
+
+# ---------------------------------------------------------------- clean versions (YouTube Music's E badge)
+
+@app.get("/api/tracks/{track_id}")
+def get_one_track(track_id: int, conn=Depends(get_conn)):
+    track = db.get_track(conn, track_id)
+    if not track:
+        raise AppError("not_found", "That song doesn't exist anymore.", 404)
+    return {"track": track}
+
+
+@app.post("/api/tracks/{track_id}/cleancheck")
+def clean_check_now(track_id: int, conn=Depends(get_conn)):
+    track = db.get_track(conn, track_id)
+    if not track:
+        raise AppError("not_found", "That song doesn't exist anymore.", 404)
+    if not ytmusic.video_id(track.get("source_url")):
+        raise AppError("not_youtube", "Only YouTube links can be checked.")
+    try:
+        cleancheck.check_track(conn, track)
+    except ytmusic.YTMError as e:
+        raise AppError("ytmusic_unreachable", f"Couldn't reach YouTube Music right now ({e}). Try again in a few minutes.", 502)
+    return {"track": db.get_track(conn, track_id)}
+
+
+class CleanKeepBody(BaseModel):
+    keep: bool
+
+
+@app.put("/api/tracks/{track_id}/clean_keep")
+def clean_keep(track_id: int, body: CleanKeepBody, conn=Depends(get_conn)):
+    if not db.get_track(conn, track_id):
+        raise AppError("not_found", "That song doesn't exist anymore.", 404)
+    with db.tx(conn):
+        conn.execute("UPDATE tracks SET clean_keep = ? WHERE id = ?", (int(body.keep), track_id))
+    return {"track": db.get_track(conn, track_id)}
+
+
+@app.post("/api/tracks/swap_explicit")
+def swap_explicit(body: IdsBody, conn=Depends(get_conn)):
+    """Point each flagged song at its explicit twin and re-download songs that already have a file.
+    Same file path, so Rekordbox keeps its link (as with any re-download)."""
+    swapped, to_download = [], []
+    with db.tx(conn):
+        for tid in body.ids:
+            t = db.get_track(conn, tid)
+            check = (t or {}).get("clean") or {}
+            # Clean edits, and user uploads where you chose the official explicit copy.
+            twin = check.get("twin") if check.get("result") in ("clean", "unofficial") else None
+            if not twin:
+                continue
+            url = ytmusic.watch_url(twin["video_id"])
+            # We already know the twin has the E badge, so record that instead of checking it again.
+            result = {"result": "explicit", "video_id": twin["video_id"], "official": True, "checked_at": time.time(),
+                      "swapped_from": t["source_url"], "v": ytmusic.RULES}
+            conn.execute("UPDATE tracks SET source_url = ?, clean_url = ?, clean_check = ?, clean_checked_at = ?, clean_keep = 0, "
+                         "updated_at = datetime('now') WHERE id = ?", (url, url, json.dumps(result), result["checked_at"], tid))
+            swapped.append(tid)
+            if t["download_status"] in ("done", "missing", "error"):
+                to_download.append(tid)
+    queued = downloads.enqueue(conn, to_download, replace=True)["queued"] if to_download else 0
+    return {"swapped": len(swapped), "queued": queued, "tracks": [db.get_track(conn, tid) for tid in swapped]}
+
+
+class CleanOnBody(BaseModel):
+    on: bool
+
+
+@app.put("/api/clean/check")
+def set_clean_check(body: CleanOnBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        db.set_setting(conn, "clean_check_on", "1" if body.on else "0")
+    clean_checker.wake()
+    return cleancheck.status(conn, clean_checker)
 
 
 @app.post("/api/tracks/delete")
@@ -715,10 +798,26 @@ def track_yt_search(track_id: int, refresh: bool = False, conn=Depends(get_conn)
     if not track:
         raise AppError("not_found", "That song doesn't exist anymore.", 404)
     try:
-        return yt_search.search(track, conn, refresh=refresh)
+        out = yt_search.search(track, conn, refresh=refresh)
     except yt_search.RateLimited:
         search_ahead.pause()  # if YouTube is pushing back, don't add background searches on top
         raise
+    return out
+
+
+@app.get("/api/tracks/{track_id}/yt_search/clean")
+def track_yt_search_clean(track_id: int, conn=Depends(get_conn)):
+    """Which Find results are the clean copy of an explicit song. Asked separately, after Find has shown
+    its results, so Find never waits for YouTube Music."""
+    track = db.get_track(conn, track_id)
+    if not track:
+        raise AppError("not_found", "That song doesn't exist anymore.", 404)
+    if db.get_setting(conn, "clean_check_on", "1") != "1":
+        return {"clean": {}}
+    hit = yt_search.cached(conn, track)
+    results = yt_search._annotate(track, hit[0]) if hit else []
+    marked = ytmusic.annotate_results(track, results, ytmusic.interactive_client())
+    return {"clean": {r["url"]: r["clean_of"] for r in marked if r.get("clean_of")}}
 
 
 def _search_ahead_setting(conn) -> int:

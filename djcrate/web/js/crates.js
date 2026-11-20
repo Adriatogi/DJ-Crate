@@ -1,5 +1,6 @@
 // Crates tab controller: which view is selected, toolbar, loading data.
 
+import { swapExplicit } from "./cleanver.js";
 import { get, post } from "./api.js";
 import { autoRelocate, initImporters } from "./importers.js";
 import { closeDetail, initDetail } from "./detail.js";
@@ -138,6 +139,10 @@ function renderToolbar() {
   if (crate?.kind === "spotify" && crate.spotify_playlist_id === "liked") meta.push("Liked Songs");
   document.getElementById("view-meta").textContent = meta.join(" · ");
   document.getElementById("btn-resync").hidden = crate?.kind !== "spotify";
+  const flagged = store.view === "smart:clean_versions" ? ts.filter((t) => t.clean_flag) : [];
+  const swapAll = document.getElementById("btn-swap-all");
+  swapAll.hidden = !flagged.length;
+  swapAll.textContent = `Swap all to explicit (${flagged.length})`;
   const toDownload = ts.filter((t) => t.source_url && ["none", "error"].includes(t.download_status)).length;
   const dl = document.getElementById("btn-download-all");
   dl.textContent = toDownload ? `⬇ Download All (${toDownload})` : "⬇ Download All";
@@ -188,6 +193,7 @@ export function initCrates() {
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;
   document.getElementById("btn-resync").onclick = () => emit("resync", Number(store.view.split(":")[1]));
+  document.getElementById("btn-swap-all").onclick = () => swapExplicit(store.tracks.filter((t) => t.clean_flag));
   const more = document.getElementById("btn-view-menu");
   more.onclick = () => viewMenu(more);
   const sortBtn = document.getElementById("btn-sort");

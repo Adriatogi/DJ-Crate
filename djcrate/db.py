@@ -5,6 +5,7 @@ the download workers and the API can read/write at the same time.
 """
 
 import contextlib
+import json
 import logging
 import re
 import sqlite3
@@ -294,7 +295,20 @@ MIGRATIONS.append(  # v9: the Edited / Ready / Broken flags are gone
     """
 )
 
+MIGRATIONS.append(  # v10: clean-version check (YouTube Music's explicit badge) for each song's link
+    """
+    ALTER TABLE tracks ADD COLUMN clean_url TEXT;
+    ALTER TABLE tracks ADD COLUMN clean_check TEXT;
+    ALTER TABLE tracks ADD COLUMN clean_checked_at REAL;
+    ALTER TABLE tracks ADD COLUMN clean_keep INTEGER NOT NULL DEFAULT 0
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
+
+# A clean copy of a song YouTube Music has as explicit, checked for the song's current link, and not kept on purpose.
+CLEAN_SQL = ("(t.clean_url IS NOT NULL AND t.clean_url = t.source_url AND t.clean_keep = 0 "
+             "AND json_extract(t.clean_check, '$.result') = 'clean')")
 
 CHECK_VERSION_SQL = (
     "(t.download_status = 'done' AND t.duration_ms IS NOT NULL "
@@ -307,6 +321,7 @@ SMART_CRATES: dict[str, tuple[str, str]] = {
     "to_download": ("Ready to Download", "(coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error'))"),
     "downloaded": ("Downloaded", "t.download_status = 'done'"),
     "check_version": ("Check Version", CHECK_VERSION_SQL),
+    "clean_versions": ("Clean Versions", CLEAN_SQL),
     "missing": ("Missing Files", "t.download_status = 'missing'"),
 }
 
@@ -476,6 +491,12 @@ def track_to_dict(row) -> dict:
     )
     if "removed_from_source" in d:
         d["removed_from_source"] = bool(d["removed_from_source"])
+    if "clean_check" in d:
+        raw = d.pop("clean_check")
+        current = bool(raw) and d.get("clean_url") and d.get("clean_url") == d.get("source_url")
+        d["clean"] = json.loads(raw) if current else None
+        d["clean_keep"] = bool(d.get("clean_keep"))
+        d["clean_flag"] = bool(d["clean"] and d["clean"].get("result") == "clean" and not d["clean_keep"])
     return d
 
 
