@@ -41,10 +41,16 @@ def test_import_never_overwrites_user_edits(lib):
 
 
 def test_plan_resync_flags_never_deletes():
-    current = {1: False, 2: False, 3: True}
+    current = {1: (False, True), 2: (False, True), 3: (True, True)}
     plan = plan_resync(current, [2, 3, 4, 4])
-    assert plan == {"add": [4], "removed": [1], "restored": [3]}
-    assert plan_resync({1: False}, [1]) == {"add": [], "removed": [], "restored": []}
+    assert plan == {"add": [4], "removed": [1], "restored": [3], "claim": []}
+    assert plan_resync({1: (False, True)}, [1]) == {"add": [], "removed": [], "restored": [], "claim": []}
+
+
+def test_plan_resync_leaves_hand_added_songs_alone():
+    # 5 was added by hand: not on Spotify, but never flagged. 6 was hand-added and is now on the playlist.
+    plan = plan_resync({1: (False, True), 5: (False, False), 6: (False, False)}, [6])
+    assert plan == {"add": [], "removed": [1], "restored": [], "claim": [6]}
 
 
 def test_parse_playlist_ref():
