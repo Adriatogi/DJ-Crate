@@ -231,3 +231,17 @@ def test_pick_endpoint_uses_finder_picker(client, monkeypatch):
     monkeypatch.setattr(tools, "pick_path", lambda kind, ext: seen.update(kind=kind, ext=ext) or "/x/rb.xml")
     assert client.post("/api/pick", json={"kind": "file", "extensions": ["xml", "a;b"]}).json() == {"path": "/x/rb.xml"}
     assert seen == {"kind": "file", "ext": ("xml",)}
+
+
+def test_migration_v10_clears_wrong_removed_flags_on_hand_added_songs(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:9])
+        m.setattr(db, "SCHEMA_VERSION", 9)
+        db.migrate(conn)
+    conn.execute("INSERT INTO crates (id, name, kind, spotify_playlist_id) VALUES (1, 'Mix #1', 'spotify', 'p')")
+    conn.execute("INSERT INTO tracks (id, title, spotify_id) VALUES (1, 'gone from Spotify', 'sp1'), (2, 'from YouTube', NULL)")
+    conn.execute("INSERT INTO crate_tracks (crate_id, track_id, removed_from_source) VALUES (1, 1, 1), (1, 2, 1)")
+    db.migrate(conn)
+    rows = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT track_id, removed_from_source, from_source FROM crate_tracks")}
+    assert rows == {1: (1, 1), 2: (0, 0)}

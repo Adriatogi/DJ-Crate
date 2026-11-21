@@ -385,15 +385,18 @@ def my_playlists(client: Client) -> list[dict]:
     return out
 
 
-def plan_resync(current: dict[int, bool], fetched: list[int]) -> dict:
-    """current: {track_id: removed_from_source}; fetched: track ids now on Spotify.
-    Nothing is ever deleted: gone songs are only flagged."""
+def plan_resync(current: dict[int, tuple[bool, bool]], fetched: list[int]) -> dict:
+    """current: {track_id: (removed_from_source, from_source)}; fetched: track ids now on Spotify.
+    Nothing is ever deleted: gone songs are only flagged. Songs added by hand
+    (not from_source) were never on the playlist, so they're never flagged.
+    `claim`: hand-added songs that are now on the playlist, so they count as from it."""
     fetched_set = set(fetched)
     add, seen = [], set()
     for tid in fetched:
         if tid not in current and tid not in seen:
             add.append(tid)
             seen.add(tid)
-    removed = [tid for tid, was_removed in current.items() if tid not in fetched_set and not was_removed]
-    restored = [tid for tid, was_removed in current.items() if tid in fetched_set and was_removed]
-    return {"add": add, "removed": removed, "restored": restored}
+    removed = [tid for tid, (was_removed, src) in current.items() if src and tid not in fetched_set and not was_removed]
+    restored = [tid for tid, (was_removed, _) in current.items() if tid in fetched_set and was_removed]
+    claim = [tid for tid, (_, src) in current.items() if tid in fetched_set and not src]
+    return {"add": add, "removed": removed, "restored": restored, "claim": claim}
