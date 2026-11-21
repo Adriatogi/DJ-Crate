@@ -294,6 +294,19 @@ MIGRATIONS.append(  # v9: the Edited / Ready / Broken flags are gone
     """
 )
 
+MIGRATIONS.append(  # v10: remember which songs in a Spotify crate came from the playlist, so
+    # re-sync doesn't flag songs you added by hand as "Removed on Spotify". Older rows
+    # can't be told apart exactly: songs with a Spotify ID count as from the playlist,
+    # and the wrong flag is cleared from the rest.
+    """
+    ALTER TABLE crate_tracks ADD COLUMN from_source INTEGER NOT NULL DEFAULT 0;
+    UPDATE crate_tracks SET from_source = 1
+     WHERE crate_id IN (SELECT id FROM crates WHERE spotify_playlist_id IS NOT NULL)
+       AND track_id IN (SELECT id FROM tracks WHERE spotify_id IS NOT NULL AND spotify_id != '');
+    UPDATE crate_tracks SET removed_from_source = 0 WHERE from_source = 0
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 CHECK_VERSION_SQL = (
@@ -489,14 +502,15 @@ def get_track(conn, track_id: int):
     return t
 
 
-def add_to_crate(conn, crate_id: int, track_ids) -> int:
+def add_to_crate(conn, crate_id: int, track_ids, from_source: bool = False) -> int:
+    """from_source: the songs come from the crate's Spotify playlist (import / re-sync)."""
     row = conn.execute("SELECT coalesce(max(position), -1) FROM crate_tracks WHERE crate_id = ?", (crate_id,)).fetchone()
     pos = row[0] + 1
     added = 0
     for tid in track_ids:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id, position) VALUES (?, ?, ?)",
-            (crate_id, tid, pos),
+            "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id, position, from_source) VALUES (?, ?, ?, ?)",
+            (crate_id, tid, pos, int(from_source)),
         )
         if cur.rowcount:
             pos += 1
