@@ -214,7 +214,12 @@ function linkCell(t) {
   });
   const find = h("button", { class: "find-btn", title: "Find YouTube link" }, "Find ▾");
   find.addEventListener("click", (e) => { e.stopPropagation(); openFind(t, find, input); });
-  return h("div", { class: "link-cell" }, input, find);
+  const auto = t.link_auto && t.source_url ? h("span", {
+    class: "auto-tag",
+    title: "Filled by Auto-fill: the top YouTube result whose length matches Spotify's, with no version warnings.\n" +
+      "Worth a quick listen (▶ after downloading). Goes away once you download it or change the link.",
+  }, "Auto") : null;
+  return h("div", { class: "link-cell" }, auto, input, find);
 }
 
 function statusCell(t) {

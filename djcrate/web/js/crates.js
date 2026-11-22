@@ -169,6 +169,7 @@ function renderToolbar() {
   swapAll.hidden = !flagged.length;
   swapAll.textContent = `Swap all to explicit (${flagged.length})`;
   const toDownload = ts.filter((t) => (t.source_url && ["none", "error"].includes(t.download_status)) || swapOwed(t)).length;
+  renderAutofill();
   const inTrash = store.view === "smart:trash";
   const empty = document.getElementById("btn-empty-trash");
   empty.hidden = !inTrash || !ts.length;
@@ -179,6 +180,62 @@ function renderToolbar() {
   dl.hidden = inTrash || store.view === "smart:hidden";
   dl.textContent = toDownload ? `⬇ Download All (${toDownload})` : "⬇ Download All";
   dl.title = toDownload ? "Download every song here that has a link and isn't downloaded yet" : "Nothing here has a link waiting to download";
+}
+
+// ---- Auto-fill links: the top fully green Find result for each song here that needs a link.
+const needsLink = (t) => !t.source_url && !["done", "missing"].includes(t.download_status);
+
+function renderAutofill() {
+  const btn = document.getElementById("btn-autofill");
+  const af = store.status?.autofill;
+  const bin = ["smart:trash", "smart:hidden"].includes(store.view);
+  if (af?.running) {
+    btn.hidden = false;
+    btn.textContent = `Auto-filling ${af.done}/${af.total}${af.filled ? ` · ${af.filled} filled` : ""}${af.paused_until ? " · paused (YouTube is busy)" : ""} · Stop`;
+    btn.title = "Click to stop. Links already filled stay.";
+    return;
+  }
+  const n = bin ? 0 : store.tracks.filter(needsLink).length;
+  btn.hidden = !n;
+  btn.textContent = `Auto-fill links (${n})`;
+  btn.title = "For each song here without a link, use the top YouTube result whose length matches Spotify's and has no version warnings " +
+    "(Remix, Live, Sped up, Clean…). Songs without one stay for you to pick. Nothing downloads until you click Download All.";
+}
+
+async function autofillClick() {
+  try {
+    if (store.status?.autofill?.running) {
+      await post("/api/autofill/stop");
+      toast("Auto-fill stopped. Links it already filled stay.");
+    } else {
+      const r = await post("/api/autofill", { view: store.view });
+      if (store.status) store.status.autofill = r;
+      toast(`Auto-filling links for ${r.total} song${r.total === 1 ? "" : "s"}. Songs without a clear match stay for you.`, { type: "info" });
+    }
+    emit("poll");
+    renderAutofill();
+  } catch (e) { errorToast(e); }
+}
+
+// Called on every status poll: refresh the list as links come in, and sum up when a run ends.
+let lastFilled = null, lastFinished;
+export function autofillProgress(af) {
+  if (lastFinished === undefined) lastFinished = af?.finished_at ?? null;   // don't replay an old run after a reload
+  if (af && af.filled !== lastFilled) {
+    lastFilled = af.filled;
+    refreshTracks();
+    refreshSidebar();
+  }
+  if (af && !af.running && af.finished_at && af.finished_at !== lastFinished) {
+    lastFinished = af.finished_at;
+    const left = af.unsure + af.failed;
+    toast(af.stopped ? `Auto-fill stopped: filled ${af.filled} link${af.filled === 1 ? "" : "s"}.`
+      : `Auto-fill done: filled ${af.filled} link${af.filled === 1 ? "" : "s"}.` +
+        (left ? ` ${left} song${left === 1 ? "" : "s"} had no clear match and still need${left === 1 ? "s" : ""} you.` : "") +
+        (af.filled ? " Hit Download All when you're ready." : ""),
+    { type: "success", timeout: 10000 });
+  }
+  renderAutofill();
 }
 
 async function downloadAll() {
@@ -224,6 +281,7 @@ export function initCrates() {
   document.getElementById("btn-add-manual").onclick = () => emit("add-manual");
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;
+  document.getElementById("btn-autofill").onclick = autofillClick;
   document.getElementById("btn-resync").onclick = () => emit("resync", Number(store.view.split(":")[1]));
   const tagBtn = document.getElementById("btn-mytags");
   tagBtn.onclick = () => mytagMenu(tagBtn);

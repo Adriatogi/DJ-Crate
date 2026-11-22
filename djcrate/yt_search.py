@@ -28,6 +28,8 @@ MIX_LABELS = [
     "extended mix", "extended", "radio edit", "club mix", "original mix", "remix", "vip", "bootleg", "edit",
     "live", "acoustic", "instrumental", "acapella", "a cappella", "sped up", "slowed", "nightcore", "reverb",
     "8d", "cover", "karaoke", "bass boosted", "remastered", "remaster", "clean", "dirty", "music video",
+    # live performances that happen to match the length (e.g. "We Outside | A COLORS SHOW")
+    "colors show", "tiny desk", "live session", "live performance", "performance", "concert", "unplugged",
 ]
 
 

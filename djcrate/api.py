@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, backup, cleancheck, trash, cutting, db, genius, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search, ytmusic
+from . import __version__, autofill, backup, cleancheck, trash, cutting, db, genius, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search, ytmusic
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -30,6 +30,7 @@ app = FastAPI(title="DJ Crate", docs_url=None, redoc_url=None)
 downloads = DownloadManager(state)
 search_ahead = yt_search.Prefetcher(state)
 clean_checker = cleancheck.Checker(state)
+auto_filler = autofill.AutoFiller(state, on_fill=lambda: clean_checker.wake())
 hooks: dict[str, Any] = {"focus": None}
 
 # Routes that must keep working in read-only mode / without a library.
@@ -134,6 +135,7 @@ def status():
             out["genius"]["configured"] = genius.configured(db.get_setting(conn, "library_id"))
             out["rekordbox"] = rekordbox.status(conn)
             out["clean"] = cleancheck.status(conn, clean_checker)
+            out["autofill"] = auto_filler.status()
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
@@ -613,6 +615,7 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
         if url and not valid_link(url):
             raise AppError("invalid_url", "Not a YouTube/SoundCloud/Bandcamp link.")
         changes["source_url"] = url or None
+        changes["link_auto"] = 0   # you set this link yourself
         if url:
             dupe = conn.execute("SELECT title, artists FROM tracks WHERE source_url = ? AND id <> ?", (url, track_id)).fetchone()
             if dupe:
@@ -892,6 +895,21 @@ def start_downloads(body: DownloadBody, conn=Depends(get_conn)):
 
 class ViewBody(BaseModel):
     view: str
+
+
+@app.post("/api/autofill")
+def start_autofill(body: ViewBody, conn=Depends(get_conn)):
+    """Auto-fill links for the songs in this view that need one (see autofill.py)."""
+    if body.view.split(":", 1)[-1] in db.BINS:
+        raise AppError("bad_view", "Restore songs from here first.")
+    tracks = list_tracks(body.view, "", conn=conn)["tracks"]
+    ids = [t["id"] for t in tracks if not (t["source_url"] or "").strip() and t["download_status"] not in ("done", "missing")]
+    return auto_filler.begin(ids, body.view)
+
+
+@app.post("/api/autofill/stop")
+def stop_autofill():
+    return auto_filler.stop()
 
 
 @app.post("/api/downloads/all")

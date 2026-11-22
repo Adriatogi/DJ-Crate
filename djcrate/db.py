@@ -399,6 +399,10 @@ MIGRATIONS.append(  # v17: keep what yt-dlp (or ffmpeg) actually said when a dow
     "ALTER TABLE jobs ADD COLUMN error_detail TEXT"
 )
 
+MIGRATIONS.append(  # v18: links filled by Auto-fill are marked until you download the song or edit the link
+    "ALTER TABLE tracks ADD COLUMN link_auto INTEGER NOT NULL DEFAULT 0"
+)
+
 
 def _columns(conn, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}

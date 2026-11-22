@@ -3,7 +3,7 @@
 
 import { get, native, post } from "./api.js";
 import { swapVersion } from "./cleanver.js";
-import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
+import { autofillProgress, initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
 import { showDocs } from "./docs.js";
@@ -119,6 +119,7 @@ async function poll() {
       emit("refresh-sidebar");
       announceClean(cf, found);
     }
+    if (tab === "crates") autofillProgress(s.autofill);
     if (q.interrupted && !interruptedPrompted) promptInterrupted(q.interrupted);
   }
   const badge = document.getElementById("activity-count");

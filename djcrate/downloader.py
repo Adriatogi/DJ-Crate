@@ -534,7 +534,7 @@ class DownloadManager:
             with db.tx(conn):
                 conn.execute(
                     "UPDATE tracks SET file_rel_path = ?, file_duration_ms = ?, download_status = 'done', error_code = NULL, "
-                    "error_msg = NULL, tag_error = ?, updated_at = datetime('now') WHERE id = ?",
+                    "error_msg = NULL, tag_error = ?, link_auto = 0, updated_at = datetime('now') WHERE id = ?",
                     (self.state.rel_path(dest), dur, tag_error, track["id"]),
                 )
                 if job.get("on_done"):
