@@ -561,5 +561,6 @@ body.no-mytags .c-mytags, body.no-mytags .mytags-only { display: none; }
 /* A failed download's own output (yt-dlp's ERROR / WARNING lines) */
 .tool-output { margin-top: 4px; font-size: 11px; }
 .tool-output summary { cursor: pointer; color: var(--muted); }
+.tool-output .btn { margin-top: 4px; }
 .tool-output pre { margin: 4px 0 0; padding: 6px 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word;
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-size: 11px; user-select: text; }

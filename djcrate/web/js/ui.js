@@ -231,6 +231,11 @@ export async function copyText(text) {
 }
 
 // What yt-dlp (or ffmpeg) actually printed for a failed download: folded away, one click to read.
-export function toolOutput(text) {
-  return h("details", { class: "tool-output" }, h("summary", {}, "yt-dlp said"), h("pre", {}, text));
+// Activity and the song card redraw themselves while downloads run, so remember which ones are open (by `key`).
+const openOutputs = new Set();
+export function toolOutput(text, key = text) {
+  const copy = h("button", { class: "btn small", onclick: async () => { await copyText(text); toast("Copied."); } }, "Copy");
+  const el = h("details", { class: "tool-output", open: openOutputs.has(key) }, h("summary", {}, "yt-dlp said"), h("pre", {}, text), copy);
+  el.addEventListener("toggle", () => { el.open ? openOutputs.add(key) : openOutputs.delete(key); });
+  return el;
 }

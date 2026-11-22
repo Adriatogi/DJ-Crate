@@ -442,7 +442,7 @@ async function renderActivity() {
     h("div", { class: `jm ${j.status === "failed" ? "err" : ""}` },
       j.status === "running" ? `${j.stage || "downloading"} ${j.stage === "downloading" ? Math.round(j.progress * 100) + "%" : ""}` :
         j.status === "queued" ? (j.error_msg || "Queued") : j.error_msg || j.status),
-    j.status === "failed" && j.error_detail ? toolOutput(j.error_detail) : null,
+    j.status === "failed" && j.error_detail ? toolOutput(j.error_detail, `job:${j.id}`) : null,
     extra.length ? h("div", { class: "ja" }, extra) : null);
   const btn = (label, fn, kind = "small") => h("button", { class: `btn ${kind}`, onclick: async () => { try { await fn(); } catch (e) { errorToast(e); } renderActivity(); poll(); } }, label);
   const sections = [];
