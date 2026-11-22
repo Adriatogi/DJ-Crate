@@ -912,6 +912,23 @@ def stop_autofill():
     return auto_filler.stop()
 
 
+@app.post("/api/autofill/undo")
+def undo_autofill(body: ViewBody, conn=Depends(get_conn)):
+    """Take back the links Auto-fill added to songs in this view that aren't downloaded or downloading:
+    they go back to Needs Link. Links you set yourself, and downloaded songs, are never touched."""
+    if body.view.split(":", 1)[-1] in db.BINS:
+        return {"undone": 0}
+    ids = [t["id"] for t in list_tracks(body.view, "", conn=conn)["tracks"]
+           if t.get("link_auto") and t["download_status"] in ("none", "error")]
+    with db.tx(conn):
+        for tid in ids:
+            conn.execute("UPDATE tracks SET source_url = NULL, link_auto = 0, clean_url = NULL, clean_check = NULL, "
+                         "clean_checked_at = NULL, download_status = 'none', error_code = NULL, error_msg = NULL, "
+                         "updated_at = datetime('now') WHERE id = ? AND link_auto = 1", (tid,))
+            conn.execute("UPDATE jobs SET status = 'dismissed' WHERE track_id = ? AND status = 'failed'", (tid,))
+    return {"undone": len(ids)}
+
+
 @app.post("/api/downloads/all")
 def download_all(body: ViewBody, conn=Depends(get_conn)):
     if body.view.split(":", 1)[-1] in db.BINS:

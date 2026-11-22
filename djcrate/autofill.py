@@ -8,6 +8,7 @@ never downloads: filled songs get an "Auto" marker until you download or edit th
 """
 
 import logging
+import re
 import threading
 import time
 
@@ -22,9 +23,28 @@ GAP_S = 2.0   # between two real YouTube searches (saved results need no gap)
 NEEDS_LINK = "coalesce(t.source_url, '') = '' AND t.download_status NOT IN ('done', 'missing')"
 
 
-def pick(results: list[dict]) -> dict | None:
-    """The top fully green result, or None if none is."""
-    return next((r for r in results if r.get("close") and not r.get("flags")), None)
+def source_rank(track: dict, result: dict) -> int:
+    """Prefer the official upload: the artist's Topic channel, then the artist's own channel,
+    then an "Official Audio/Video" title, then anything else (fan re-uploads are fine, just last)."""
+    artists = [db.normalize(a) for a in re.split(r",|&", track.get("artists") or "") if db.normalize(a)]
+    channel = db.normalize(result.get("channel"))
+    title = db.normalize(result.get("title"))
+    mine = any(f" {a} " in f" {channel} " for a in artists)
+    if mine and channel.endswith(" topic"):
+        return 0
+    if mine:
+        return 1
+    if "official audio" in title or "official video" in title:
+        return 2
+    return 3
+
+
+def pick(results: list[dict], track: dict | None = None) -> dict | None:
+    """The best fully green result (official first, then YouTube's order), or None if none is."""
+    green = [r for r in results if r.get("close") and not r.get("flags")]
+    if not green:
+        return None
+    return min(green, key=lambda r: source_rank(track or {}, r)) if track else green[0]
 
 
 class AutoFiller:
@@ -87,7 +107,7 @@ class AutoFiller:
                 track = dict(row)
                 searched = yt_search.cached(conn, track) is None
                 try:
-                    found = pick(yt_search.search(track, conn)["results"])
+                    found = pick(yt_search.search(track, conn)["results"], track)
                 except yt_search.RateLimited:
                     self.paused_until = time.time() + yt_search.RATE_LIMIT_PAUSE_S
                     log.warning("Auto-fill paused for %ss (YouTube is rate-limiting searches)", yt_search.RATE_LIMIT_PAUSE_S)

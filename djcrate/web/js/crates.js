@@ -186,6 +186,10 @@ function renderToolbar() {
 const needsLink = (t) => !t.source_url && !["done", "missing"].includes(t.download_status);
 
 function renderAutofill() {
+  const undo = document.getElementById("btn-autofill-undo");
+  const autos = store.tracks.filter((t) => t.link_auto && ["none", "error"].includes(t.download_status)).length;
+  undo.hidden = !autos || ["smart:trash", "smart:hidden"].includes(store.view);
+  undo.textContent = `Undo auto-fill (${autos})`;
   const btn = document.getElementById("btn-autofill");
   const af = store.status?.autofill;
   const bin = ["smart:trash", "smart:hidden"].includes(store.view);
@@ -214,6 +218,20 @@ async function autofillClick() {
     }
     emit("poll");
     renderAutofill();
+  } catch (e) { errorToast(e); }
+}
+
+async function undoAutofill() {
+  const n = store.tracks.filter((t) => t.link_auto && ["none", "error"].includes(t.download_status)).length;
+  const ok = await confirmDialog(`Undo auto-fill for ${n} song${n === 1 ? "" : "s"}?`,
+    "The links Auto-fill added to the songs here (the ones marked Auto that aren't downloaded yet) are removed, " +
+    "and those songs go back to Needs Link. Links you set yourself and downloaded songs aren't touched.", { ok: "Undo auto-fill" });
+  if (!ok) return;
+  try {
+    const r = await post("/api/autofill/undo", { view: store.view });
+    toast(`Removed ${r.undone} auto-filled link${r.undone === 1 ? "" : "s"}. Those songs are back in Needs Link.`);
+    refreshTracks();
+    refreshSidebar();
   } catch (e) { errorToast(e); }
 }
 
@@ -282,6 +300,7 @@ export function initCrates() {
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;
   document.getElementById("btn-autofill").onclick = autofillClick;
+  document.getElementById("btn-autofill-undo").onclick = undoAutofill;
   document.getElementById("btn-resync").onclick = () => emit("resync", Number(store.view.split(":")[1]));
   const tagBtn = document.getElementById("btn-mytags");
   tagBtn.onclick = () => mytagMenu(tagBtn);

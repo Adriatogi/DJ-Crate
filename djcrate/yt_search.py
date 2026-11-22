@@ -30,6 +30,8 @@ MIX_LABELS = [
     "8d", "cover", "karaoke", "bass boosted", "remastered", "remaster", "clean", "dirty", "music video",
     # live performances that happen to match the length (e.g. "We Outside | A COLORS SHOW")
     "colors show", "tiny desk", "live session", "live performance", "performance", "concert", "unplugged",
+    # fan edits that keep the length
+    "dance video", "432hz", "432 hz",
 ]
 
 
@@ -47,6 +49,21 @@ def mix_flags(spotify_title: str, result_title: str) -> list[str]:
     want, got = _labels(spotify_title), _labels(result_title)
     flags = [f"Says “{l.title()}” — not in the Spotify title" for l in sorted(got - want)]
     flags += [f"Missing “{l.title()}”" for l in sorted(want - got)]
+    return flags
+
+
+def match_flags(track: dict, result: dict) -> list[str]:
+    """Is this result even the same song? Same length is not enough (e.g. another song by the same artist)."""
+    from . import cutting
+    flags = []
+    text = f" {db.normalize(result.get('title'))} "
+    want = cutting.clean_title(track.get("title"))
+    if want and f" {want} " not in text:
+        flags.append(f"Title doesn't say “{track.get('title')}”")
+    artists = [db.normalize(a) for a in re.split(r",|&", track.get("artists") or "")]
+    where = f"{text}{db.normalize(result.get('channel'))} "
+    if artists and not any(a and f" {a} " in where for a in artists):
+        flags.append("Artist isn't in the title or channel")
     return flags
 
 
@@ -107,7 +124,7 @@ def _annotate(track: dict, raw: list[dict]) -> list[dict]:
     for r in raw:
         diff = (r["duration_ms"] - target) if (r.get("duration_ms") is not None and target) else None
         out.append({**r, "diff_ms": diff, "close": diff is not None and abs(diff) <= CLOSE_MS,
-                    "flags": mix_flags(track.get("title", ""), r.get("title") or "")})
+                    "flags": mix_flags(track.get("title", ""), r.get("title") or "") + match_flags(track, r)})
     return out
 
 

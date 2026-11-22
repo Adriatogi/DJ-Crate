@@ -89,3 +89,39 @@ def test_live_performances_are_not_green():
     assert yt_search.mix_flags("We Outside", "Flagboy Giz - We Outside | A COLORS SHOW")
     assert yt_search.mix_flags("Song", "Artist: Tiny Desk Concert")
     assert not yt_search.mix_flags("Glide", "Hoodboi - Glide feat. Tkay Maidza (Official Audio)")
+
+
+def test_official_upload_wins_when_several_are_green():
+    track = {"artists": "03 Greedo, Maxo Kream", "title": "Wit the Plug"}
+    fan = {"url": "u1", "close": True, "flags": [], "title": "03 Greedo - Wit The Plug", "channel": "RapFan"}
+    official_title = {"url": "u2", "close": True, "flags": [], "title": "Wit the Plug (Official Audio)", "channel": "Some Label"}
+    own = {"url": "u3", "close": True, "flags": [], "title": "Wit the Plug", "channel": "03 Greedo"}
+    topic = {"url": "u4", "close": True, "flags": [], "title": "Wit the Plug", "channel": "03 Greedo - Topic"}
+    assert autofill.pick([fan, official_title, own, topic], track)["url"] == "u4"
+    assert autofill.pick([fan, official_title, own], track)["url"] == "u3"
+    assert autofill.pick([fan, official_title], track)["url"] == "u2"
+    assert autofill.pick([fan], track)["url"] == "u1"            # a re-upload is fine when it's all there is
+
+
+def test_same_length_is_not_enough():
+    t = {"artists": "Draft Day", "title": "LUV & DRUGS", "duration_ms": 145000}
+    raw = [{"url": "a", "title": "GIFT & CURSE", "channel": "Draft Day", "duration_ms": 147000},
+           {"url": "b", "title": "Draft Day - LUV & DRUGS (Official Video)", "channel": "Draft Day", "duration_ms": 146000},
+           {"url": "c", "title": "LUV & DRUGS", "channel": "", "duration_ms": 145000},
+           {"url": "d", "title": "Helluva Price ( Dance Video )", "channel": "x", "duration_ms": 145000}]
+    res = yt_search._annotate(t, raw)
+    assert [bool(r["flags"]) for r in res] == [True, False, True, True]  # other song / ok / no artist / dance edit
+    assert autofill.pick(res, t)["url"] == "b"
+
+
+def test_undo_takes_back_auto_links_only(client, lib):
+    auto, mine, done = add(lib, "Auto"), add(lib, "Mine", url="https://youtu.be/mine0000000"), add(lib, "Done", status="done")
+    conn = lib.conn()
+    conn.execute("UPDATE tracks SET source_url = 'https://youtu.be/auto0000000', link_auto = 1 WHERE id IN (?, ?)", (auto, done))
+    conn.close()
+    assert client.post("/api/autofill/undo", json={"view": "smart:all"}).json()["undone"] == 1
+    t = {x["id"]: x for x in client.get("/api/tracks").json()["tracks"]}
+    assert not t[auto]["source_url"] and not t[auto]["link_auto"]
+    assert t[mine]["source_url"] == "https://youtu.be/mine0000000"
+    assert t[done]["source_url"] == "https://youtu.be/auto0000000"     # downloaded: never touched
+    assert auto in {x["id"] for x in client.get("/api/tracks?view=smart:needs_link").json()["tracks"]}
