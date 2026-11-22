@@ -27,10 +27,10 @@ export function renderSidebar() {
     h("span", { class: "name" }, s.name),
     h("span", { class: "count" }, ["check_version", "missing", "clean_versions", "no_crate", "hidden", "trash"].includes(s.key) && !s.count ? "" : s.count),
   );
-  document.getElementById("smart-list").replaceChildren(...data.smart.map(item));
+  // Hidden and Trash sit at the end of the same list, after a divider. Songs there don't count anywhere else.
+  const bins = (data.bins || []).map(item);
+  document.getElementById("smart-list").replaceChildren(...data.smart.map(item), ...(bins.length ? [h("div", { class: "nav-sep" }), ...bins] : []));
   document.getElementById("tree").replaceChildren(...data.tree.map(renderNode));
-  // Hidden and Trash: their own section at the bottom. Songs there don't count anywhere else.
-  document.getElementById("bin-list").replaceChildren(...(data.bins || []).map(item));
 }
 
 function statsLine(c) {

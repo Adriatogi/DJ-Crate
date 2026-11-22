@@ -350,6 +350,30 @@ MIGRATIONS.append(  # v14: a download can be for a different link than the song'
     """
 )
 
+# Repair for a fixed bug: swapping a downloaded song used to switch its link and clean/explicit label before
+# the new copy downloaded, so a failed download left the old file labelled as the other version. Those songs
+# (swapped, a file, and no download finished since the swap) go back to the link their file came from, and
+# their label is cleared so the background check labels them again. Failed jobs for them are dismissed.
+STALE_SWAP_SQL = """
+    json_extract(t.clean_check, '$.swapped_from') IS NOT NULL
+    AND t.download_status = 'done'
+    AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.track_id = t.id AND j.status = 'done'
+                    AND j.updated_at >= datetime(t.clean_checked_at, 'unixepoch'))
+"""
+
+
+def _repair_stale_swaps(conn) -> None:
+    ids = [r[0] for r in conn.execute("SELECT t.id FROM tracks t WHERE " + STALE_SWAP_SQL)]
+    for tid in ids:
+        conn.execute("UPDATE tracks SET source_url = json_extract(clean_check, '$.swapped_from'), clean_url = NULL, "
+                     "clean_check = NULL, clean_checked_at = NULL, updated_at = datetime('now') WHERE id = ?", (tid,))
+        conn.execute("UPDATE jobs SET status = 'dismissed' WHERE track_id = ? AND status = 'failed'", (tid,))
+    if ids:
+        log.info("Put %d swapped songs back to the link their file came from (their new copy never downloaded)", len(ids))
+
+
+MIGRATIONS.append(_repair_stale_swaps)  # v15
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 # The song's current link is the clean copy of a song YouTube Music also has as explicit.
@@ -364,7 +388,7 @@ CHECK_VERSION_SQL = (
 # Songs that show anywhere: not in the Trash and not hidden. Every view, count and export uses this.
 ACTIVE = "(t.trashed_at IS NULL AND t.hidden_at IS NULL)"
 
-# The two bins at the bottom of the sidebar (they are *not* filtered by ACTIVE).
+# The two bins, listed after the smart crates (they are *not* filtered by ACTIVE).
 BINS: dict[str, tuple[str, str]] = {
     "hidden": ("Hidden", "(t.hidden_at IS NOT NULL AND t.trashed_at IS NULL)"),
     "trash": ("Trash", "t.trashed_at IS NOT NULL"),

@@ -312,3 +312,23 @@ def test_swap_of_a_downloaded_song_only_switches_once_the_new_file_is_in(client,
     assert t["source_url"] == ytmusic.watch_url(EXPL) and not t["clean_flag"] and t["clean"]["result"] == "explicit"
     assert t["clean"]["clean_twin"]["video_id"] == CLEAN and t["download_status"] == "done"
     assert not cleancheck.due_count(lib.conn())   # recorded for the new link, nothing to re-check
+
+
+def test_migration_repairs_swaps_whose_download_never_finished(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:14])
+        m.setattr(db, "SCHEMA_VERSION", 14)
+        db.migrate(conn)
+    clean, expl = f"https://youtu.be/{CLEAN}", ytmusic.watch_url(EXPL)
+    swapped = json.dumps({"result": "explicit", "video_id": EXPL, "swapped_from": clean, "checked_at": 1000, "v": ytmusic.RULES})
+    for tid, status in ((1, "done"), (2, "done"), (3, "none")):
+        conn.execute("INSERT INTO tracks (id, title, source_url, clean_url, clean_check, clean_checked_at, download_status, file_rel_path) "
+                     "VALUES (?, 't', ?, ?, ?, 1000, ?, 'f.mp3')", (tid, expl, expl, swapped, status))
+    conn.execute("INSERT INTO jobs (track_id, status, updated_at) VALUES (1, 'failed', datetime(1001, 'unixepoch'))")  # swap failed
+    conn.execute("INSERT INTO jobs (track_id, status, updated_at) VALUES (2, 'done', datetime(1005, 'unixepoch'))")    # swap worked
+    db.migrate(conn)
+    rows = {r["id"]: dict(r) for r in conn.execute("SELECT id, source_url, clean_check FROM tracks")}
+    assert rows[1]["source_url"] == clean and rows[1]["clean_check"] is None   # back to the file's own link, to be re-checked
+    assert rows[2]["source_url"] == expl and rows[3]["source_url"] == expl     # a finished swap / no file: left alone
+    assert conn.execute("SELECT status FROM jobs WHERE track_id = 1").fetchone()[0] == "dismissed"

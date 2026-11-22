@@ -126,7 +126,7 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 .side-actions { padding: 12px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--line); }
 #smart-list { padding: 8px 6px; border-bottom: 1px solid var(--line); }
-#bin-list { padding: 8px 6px; margin-top: auto; border-top: 1px solid var(--line); }
+.nav-sep { height: 1px; background: var(--line); margin: 6px 8px; }
 .trash-why { margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bin-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; margin-bottom: 10px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--bg-3); font-size: 12px; }
