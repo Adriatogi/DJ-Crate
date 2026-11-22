@@ -2,7 +2,7 @@
 that is fully green (length within CLOSE_MS of Spotify's and no version warnings like
 "Remix", "Live" or "Clean"). Songs without one stay in Needs Link for you to pick.
 
-Runs only when you click it, one search at a time (saved Find results are reused),
+Runs only when you click it, one fresh search at a time (it never relies on saved results),
 pauses when YouTube rate-limits, never touches a song that already has a link, and
 never downloads: filled songs get an "Auto" marker until you download or edit them.
 """
@@ -17,7 +17,7 @@ from .errors import AppError
 
 log = logging.getLogger("djcrate.autofill")
 
-GAP_S = 2.0   # between two real YouTube searches (saved results need no gap)
+GAP_S = 2.0   # between two YouTube searches
 
 # A song that needs a link: no link, and nothing downloaded for it.
 NEEDS_LINK = "coalesce(t.source_url, '') = '' AND t.download_status NOT IN ('done', 'missing')"
@@ -105,9 +105,11 @@ class AutoFiller:
             outcome = "skipped"
             if row:
                 track = dict(row)
-                searched = yt_search.cached(conn, track) is None
+                searched = True
                 try:
-                    found = pick(yt_search.search(track, conn)["results"], track)
+                    # Always a fresh search, never saved results: running it again (e.g. after Undo) looks again.
+                    # The fresh results are saved, so Find opens instantly afterwards.
+                    found = pick(yt_search.search(track, conn, refresh=True)["results"], track)
                 except yt_search.RateLimited:
                     self.paused_until = time.time() + yt_search.RATE_LIMIT_PAUSE_S
                     log.warning("Auto-fill paused for %ss (YouTube is rate-limiting searches)", yt_search.RATE_LIMIT_PAUSE_S)

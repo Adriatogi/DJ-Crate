@@ -125,3 +125,15 @@ def test_undo_takes_back_auto_links_only(client, lib):
     assert t[mine]["source_url"] == "https://youtu.be/mine0000000"
     assert t[done]["source_url"] == "https://youtu.be/auto0000000"     # downloaded: never touched
     assert auto in {x["id"] for x in client.get("/api/tracks?view=smart:needs_link").json()["tracks"]}
+
+
+def test_every_run_searches_fresh(lib, monkeypatch):
+    monkeypatch.setattr(autofill, "GAP_S", 0)
+    tid = add(lib, "Song")
+    seen = []
+    monkeypatch.setattr(yt_search, "search", lambda track, conn=None, refresh=False: (seen.append(refresh), {"results": [OFF]})[1])
+    f = AutoFiller(lib)
+    for _ in range(2):
+        f.begin([tid], "smart:needs_link")
+        run_all(f)
+    assert seen == [True, True]
