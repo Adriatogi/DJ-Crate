@@ -518,16 +518,20 @@ LEFT JOIN (SELECT track_id, id job_id, status job_status, progress job_progress,
 
 
 @app.get("/api/tracks")
-def list_tracks(view: str = "smart:all", q: str = "", sub: int = 1, artist: str = "", others: int = 0, nogenre: int = 0, ingenre: int = 0, conn=Depends(get_conn)):
+def list_tracks(view: str = "smart:all", q: str = "", sub: int = 1, artist: str = "", others: int = 0, nogenre: int = 0, ingenre: int = 0,
+                mytag: str = "", conn=Depends(get_conn)):
     params: list = []
     search = ""
+    params_search: list = []
     if q.strip():
         like = f"%{q.strip()}%"
-        search = (" AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ? OR t.notes LIKE ? OR t.id IN "
+        search = (" AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ? OR t.notes LIKE ? OR t.rekordbox_mytags LIKE ? OR t.id IN "
                   "(SELECT tg.track_id FROM track_genres tg JOIN genres g ON g.id = tg.genre_id WHERE g.name LIKE ?))")
-        params_search = [like] * 5
-    else:
-        params_search = []
+        params_search = [like] * 6
+    if mytag.strip():  # exactly this Rekordbox My Tag (any case)
+        search += (" AND t.rekordbox_mytags IS NOT NULL AND EXISTS "
+                   "(SELECT 1 FROM json_each(t.rekordbox_mytags) WHERE lower(json_each.value) = lower(?))")
+        params_search.append(mytag.strip())
     if view.startswith("crate:"):
         crate_id = int(view.split(":", 1)[1])
         crate = conn.execute("SELECT * FROM crates WHERE id = ?", (crate_id,)).fetchone()
@@ -1506,6 +1510,15 @@ class XmlBody(BaseModel):
 
 class ExportBody(BaseModel):
     on: bool
+
+
+@app.get("/api/mytags")
+def list_mytags(conn=Depends(get_conn)):
+    """Every Rekordbox My Tag found in the XML export, with how many songs have it. Read-only."""
+    rows = conn.execute(
+        "SELECT min(j.value) AS name, count(DISTINCT t.id) AS songs FROM tracks t, json_each(t.rekordbox_mytags) j "
+        "WHERE t.rekordbox_mytags IS NOT NULL GROUP BY lower(j.value) ORDER BY lower(j.value)").fetchall()
+    return {"tags": [{"name": r["name"], "songs": r["songs"]} for r in rows]}
 
 
 @app.put("/api/rekordbox/xml")

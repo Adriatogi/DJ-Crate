@@ -10,7 +10,7 @@ Tools like spotdl download your Spotify playlists by guessing the YouTube video.
 4. Write notes on any song (they stay in DJ Crate). The Genre Rack, Cutting and Set Setter keep the rest of your prep in one place.
 5. Plan sets in **Set Setter**: an ordered running list with cue times, transition notes and running time, exportable as text.
 
-6. **BPM & key from Rekordbox.** Export your collection as XML from Rekordbox and DJ Crate shows sortable BPM and Key columns (`8A · Am`), refreshing whenever you re-export.
+6. **BPM & key from Rekordbox.** Export your collection as XML from Rekordbox and DJ Crate shows sortable BPM and Key columns (`8A · Am`), refreshing whenever you re-export. Your **My Tags** come along read-only (a My Tags column, plus a filter) if Rekordbox is set to add My Tags to Comments.
 7. **Send crates & sets to Rekordbox.** Crates, folders and sets become playlists in a separate `DJ Crate for Rekordbox.xml` that DJ Crate writes and keeps up to date by itself; you never make or edit it. Rekordbox matches songs by file path, so there are no duplicates.
 
 Everything stays on your Mac. DJ Crate runs as a normal app window; no browser tab or terminal is needed. Open the **Docs** tab inside the app for everything it does and why.
@@ -135,6 +135,8 @@ DJ Crate and Rekordbox stay **separate on purpose**, with one shared music folde
 6. If you edit a song's title, artists or genres in DJ Crate *after* importing, right-click it in Rekordbox and choose **Reload Tag**.
 
 **BPM and key** come from Rekordbox's own analysis (so your fixes count), through its XML export. In Rekordbox: File → **Export Collection in xml format**. In DJ Crate: **Settings → Rekordbox → Choose XML file…**. Re-export over the same file and DJ Crate updates within ~10 seconds.
+
+**My Tags** are read from the same XML, and only read: DJ Crate never writes Comments or My Tags, since writing to Rekordbox's data can corrupt it. Rekordbox only includes them if you turn on its setting that adds My Tags to Comments (`/* Hype / Vocal */`); DJ Crate reads that block. Change tags in Rekordbox and export again; tags removed there disappear on the next import. The setting's exact name is still to be confirmed.
 
 **Genres** live in DJ Crate's **Genre Rack** tab. They are written into the MP3's Genre tag as `Parent / Sub-genre`, which Rekordbox shows in its Genre column; for songs Rekordbox already has, use right-click → Reload Tag there (to be confirmed). DJ Crate never touches the comment tag, so Rekordbox's Comments (and anything My Tag adds to them) stay yours. The Genre in your Rekordbox XML is read too, as a suggestion or a ⚠ when it differs. MusicBrainz is asked (slowly, in the background; switch it off in Settings → Genres) for suggestions on songs with no genre.
 

@@ -13,7 +13,7 @@ let loadSeq = 0;
 
 const SORTS = {
   default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key", genre: "Genre",
-  added: "Date added", status: "Status",
+  mytags: "My Tags", added: "Date added", status: "Status",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
 store.sort = JSON.parse(localStorage.getItem("djc.sort") || '{"key":"default","dir":1}');
@@ -24,6 +24,7 @@ function sortValue(t, key) {
     case "bpm": return t.bpm ?? 0;
     case "musical_key": return keyOrder(t.musical_key);
     case "genre": return t.genre_tag ? t.genre_tag.toLowerCase() : "\uffff"; // songs without a genre last
+    case "mytags": return t.mytags?.length ? t.mytags.join(" / ").toLowerCase() : "\uffff";
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
     default: return (t[key] || "").toLowerCase();
@@ -90,7 +91,8 @@ export async function refreshTracks() {
   const q = document.getElementById("search").value;
   try {
     const rack = store.view.startsWith("genre:") ? `&sub=${store.rack.sub ? 1 : 0}&artist=${encodeURIComponent(store.rack.artist)}` : "";
-    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${rack}`);
+    const tag = store.mytag ? `&mytag=${encodeURIComponent(store.mytag)}` : "";
+    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${rack}${tag}`);
     if (seq !== loadSeq) return; // a newer request won
     r.tracks.forEach((t, i) => { t._order = i; });
     store.tracks = r.tracks;
@@ -127,6 +129,32 @@ function viewInfo() {
   const key = v.split(":")[1];
   const s = store.sidebar?.smart.find((x) => x.key === key);
   return { name: s?.name || "All Tracks", crate: null };
+}
+
+// ---- My Tags filter (Rekordbox My Tags, read-only). Stays on while you switch views.
+function setMytag(tag) {
+  store.mytag = tag || null;
+  resetTable();
+  renderMytagButton();
+  refreshTracks();
+}
+
+function renderMytagButton() {
+  const btn = document.getElementById("btn-mytags");
+  btn.textContent = store.mytag ? `My Tag: ${store.mytag} ✕` : "My Tags ▾";
+  btn.classList.toggle("active", !!store.mytag);
+  btn.title = store.mytag ? "Showing only songs with this Rekordbox My Tag. Click to show all songs." : "Show only songs with one of your Rekordbox My Tags";
+}
+
+async function mytagMenu(anchor) {
+  if (store.mytag) return setMytag(null);
+  try {
+    const { tags } = await get("/api/mytags");
+    menu(anchor, tags.length
+      ? [{ label: "Rekordbox My Tags (read-only)", header: true },
+        ...tags.map((t) => ({ label: `${t.name}  ·  ${t.songs}`, fn: () => setMytag(t.name) }))]
+      : [{ label: "No My Tags found. See Settings → Rekordbox.", header: true }], { align: "right" });
+  } catch (e) { errorToast(e); }
 }
 
 function renderToolbar() {
@@ -193,6 +221,10 @@ export function initCrates() {
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;
   document.getElementById("btn-resync").onclick = () => emit("resync", Number(store.view.split(":")[1]));
+  const tagBtn = document.getElementById("btn-mytags");
+  tagBtn.onclick = () => mytagMenu(tagBtn);
+  on("filter-mytag", setMytag);
+  renderMytagButton();
   document.getElementById("btn-swap-all").onclick = () => swapVersion(store.tracks.filter((t) => t.clean_flag), "explicit");
   const more = document.getElementById("btn-view-menu");
   more.onclick = () => viewMenu(more);

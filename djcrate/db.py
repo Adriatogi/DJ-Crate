@@ -304,6 +304,12 @@ MIGRATIONS.append(  # v10: clean-version check (YouTube Music's explicit badge) 
     """
 )
 
+MIGRATIONS.append(  # v11: Rekordbox My Tags (read-only), read from the Comments in a Rekordbox XML export
+    """
+    ALTER TABLE tracks ADD COLUMN rekordbox_mytags TEXT
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 # The song's current link is the clean copy of a song YouTube Music also has as explicit.
@@ -497,6 +503,9 @@ def track_to_dict(row) -> dict:
         d["clean"] = json.loads(raw) if current else None
         d.pop("clean_keep", None)   # no longer used (labels are neutral, nothing to dismiss)
         d["clean_flag"] = bool(d["clean"] and d["clean"].get("result") == "clean")
+    if "rekordbox_mytags" in d:
+        raw = d.pop("rekordbox_mytags")
+        d["mytags"] = json.loads(raw) if raw else []   # read-only: they're edited in Rekordbox
     return d
 
 

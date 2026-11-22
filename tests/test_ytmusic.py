@@ -211,7 +211,7 @@ def test_find_still_works_when_youtube_music_is_down(client, monkeypatch):
 def test_migration_adds_columns(lib):
     cols = {r["name"] for r in lib.conn().execute("PRAGMA table_info(tracks)")}
     assert {"clean_url", "clean_check", "clean_checked_at", "clean_keep"} <= cols
-    assert db.SCHEMA_VERSION == 10
+    assert db.SCHEMA_VERSION >= 10
 
 
 def test_user_uploads_are_never_flagged(client, lib, ytm, monkeypatch):

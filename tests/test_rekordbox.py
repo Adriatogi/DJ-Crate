@@ -73,7 +73,7 @@ def test_import_matches_paths_and_leaves_others(lib, tmp_path):
     write_xml(xml, [(lib.library / "Space Song.mp3", "93.50", "Am"), (lib.library / nfd, "128.00", "8B"),
                     (lib.library / "Zero.mp3", "0.00", "Fm"), ("/elsewhere/not-mine.mp3", "120", "Cm")])
     s = rekordbox.import_xml(conn, xml)
-    assert s == {"matched": 3, "total": 4, "in_xml": 4, "genres": 0}
+    assert s == {"matched": 3, "total": 4, "in_xml": 4, "genres": 0, "mytags": 0}
     assert tuple(row(lib, a)) == (93.5, "8A") and tuple(row(lib, b)) == (128.0, "8B")
     assert tuple(row(lib, c)) == (99, "1A")  # not in the XML
     assert tuple(row(lib, d)) == (None, "4A")  # BPM 0.00 means unknown
@@ -231,3 +231,78 @@ def test_pick_endpoint_uses_finder_picker(client, monkeypatch):
     monkeypatch.setattr(tools, "pick_path", lambda kind, ext: seen.update(kind=kind, ext=ext) or "/x/rb.xml")
     assert client.post("/api/pick", json={"kind": "file", "extensions": ["xml", "a;b"]}).json() == {"path": "/x/rb.xml"}
     assert seen == {"kind": "file", "ext": ("xml",)}
+
+
+# ---------------------------------------------------------------- My Tags (read-only, from Comments)
+
+def test_parse_mytags():
+    assert rekordbox.parse_mytags("/* Hype / Vocal */ great opener") == ["Hype", "Vocal"]
+    assert rekordbox.parse_mytags("/*Hype/Vocal*/") == ["Hype", "Vocal"]
+    assert rekordbox.parse_mytags("note before /* Peak  Time */") == ["Peak Time"]
+    assert rekordbox.parse_mytags("/* A / B */ and /* b / C */") == ["A", "B", "C"]
+    assert rekordbox.parse_mytags("/* A /  / A */") == ["A"]
+    for none in (None, "", "just a comment", "/* */"):
+        assert rekordbox.parse_mytags(none) == []
+
+
+def write_tag_xml(path, tracks):
+    """tracks: [(location, comments or None)]"""
+    from xml.sax.saxutils import quoteattr
+    body = "".join(
+        f'<TRACK TrackID="{i}" Name="n" Location="{rekordbox.path_to_location(loc)}"'
+        + (f" Comments={quoteattr(c)}" if c is not None else "") + "/>"
+        for i, (loc, c) in enumerate(tracks, 1))
+    Path(path).write_text(f'<?xml version="1.0"?><DJ_PLAYLISTS><COLLECTION>{body}</COLLECTION></DJ_PLAYLISTS>', encoding="utf-8")
+
+
+def tags_of(lib, tid):
+    conn = lib.conn()
+    try:
+        return conn.execute("SELECT rekordbox_mytags FROM tracks WHERE id = ?", (tid,)).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_import_mytags_and_clear_on_reimport(lib, tmp_path):
+    a = add_song(lib, "Tagged")
+    b = add_song(lib, "Plain")
+    c = add_song(lib, "Not In Xml")
+    xml = tmp_path / "rb.xml"
+    write_tag_xml(xml, [(lib.library / "Tagged.mp3", "/* Hype / Vocal */ opener"), (lib.library / "Plain.mp3", None)])
+    s = rekordbox.import_xml(lib.conn(), xml)
+    assert s["mytags"] == 1
+    assert json.loads(tags_of(lib, a)) == ["Hype", "Vocal"]
+    assert json.loads(tags_of(lib, b)) == []
+    assert tags_of(lib, c) is None
+    write_tag_xml(xml, [(lib.library / "Tagged.mp3", "opener")])  # tags removed in Rekordbox
+    rekordbox.import_xml(lib.conn(), xml)
+    assert json.loads(tags_of(lib, a)) == []
+
+
+def test_mytags_api_filter_search_and_list(client, lib, tmp_path):
+    a = add_song(lib, "One")
+    b = add_song(lib, "Two")
+    add_song(lib, "Three")
+    xml = tmp_path / "rb.xml"
+    write_tag_xml(xml, [(lib.library / "One.mp3", "/* Hype / Vocal */"), (lib.library / "Two.mp3", "/* Hyped / vocal */")])
+    client.put("/api/rekordbox/xml", json={"path": str(xml)})
+    ids = lambda r: {t["id"] for t in r.json()["tracks"]}
+    assert ids(client.get("/api/tracks?mytag=hype")) == {a}          # exact, any case: not "Hyped"
+    assert ids(client.get("/api/tracks?mytag=Vocal")) == {a, b}
+    assert ids(client.get("/api/tracks?q=hyped")) == {b}             # search finds tags too
+    one = next(t for t in client.get("/api/tracks").json()["tracks"] if t["id"] == a)
+    assert one["mytags"] == ["Hype", "Vocal"] and "rekordbox_mytags" not in one
+    tags = client.get("/api/mytags").json()["tags"]
+    assert [(t["name"].lower(), t["songs"]) for t in tags] == [("hype", 1), ("hyped", 1), ("vocal", 2)]
+    assert client.get("/api/status").json()["rekordbox"]["mytags"] == 2
+
+
+def test_export_never_sends_comments_or_mytags(lib, tmp_path):
+    a = add_song(lib, "Song", notes="my note")
+    conn = lib.conn()
+    conn.execute("UPDATE tracks SET rekordbox_mytags = ? WHERE id = ?", (json.dumps(["Hype"]), a))
+    data, _ = rekordbox.build_export(lib, conn)
+    root = ET.fromstring(data)
+    for el in root.iter("TRACK"):
+        assert "Comments" not in el.attrib
+    assert b"Hype" not in data

@@ -73,7 +73,9 @@ function renderEmpty() {
   const q = document.getElementById("search").value.trim();
   const v = store.view;
   let content;
-  if (q) content = [h("h3", {}, `No matches for “${q}”`)];
+  if (store.mytag) content = [h("h3", {}, `No songs here with the My Tag “${store.mytag}”${q ? ` matching “${q}”` : ""}`),
+    h("button", { class: "btn", onclick: () => emit("filter-mytag", null) }, "Show all songs")];
+  else if (q) content = [h("h3", {}, `No matches for “${q}”`)];
   else if (v === "smart:all") {
     content = [
       h("h3", {}, "Your library is empty"),
@@ -142,6 +144,7 @@ function rowFor(t) {
     h("td", { class: "c-bpm muted", title: t.bpm ? "" : NO_ANALYSIS }, fmtBpm(t.bpm)),
     h("td", { class: "c-key muted", title: t.musical_key ? "" : NO_ANALYSIS }, fmtKey(t.musical_key)),
     h("td", { class: "c-genre" }, genreControl(t)),
+    h("td", { class: "c-mytags" }, mytagChips(t)),
     h("td", { class: "c-link" }, linkCell(t)),
     h("td", { class: "c-play" }, playButton(t, tr)),
     h("td", { class: "c-status" }, statusCell(t)),
@@ -160,6 +163,20 @@ function rowFor(t) {
   tr.addEventListener("dragend", () => { drag.type = null; });
   if (store.detailId === t.id) tr.classList.add("open");
   return tr;
+}
+
+// Rekordbox My Tags: read-only chips (edit them in Rekordbox). Clicking one shows only songs with that tag.
+export function mytagChips(t, { all = false } = {}) {
+  const tags = t.mytags || [];
+  if (!tags.length) return null;
+  const shown = all ? tags : tags.slice(0, 2);
+  const box = h("div", { class: "mytag-cell", title: `My Tags from Rekordbox: ${tags.join(", ")}\nRead-only. Edit them in Rekordbox. Click a tag to show only songs with it.` },
+    shown.map((tag) => h("button", {
+      class: `mytag${store.mytag && store.mytag.toLowerCase() === tag.toLowerCase() ? " on" : ""}`,
+      onclick: (e) => { e.stopPropagation(); emit("filter-mytag", tag); },
+    }, tag)),
+    tags.length > shown.length ? h("span", { class: "muted small" }, `+${tags.length - shown.length}`) : null);
+  return box;
 }
 
 function linkCell(t) {
@@ -552,7 +569,7 @@ function togglePlayer(t, tr) {
     closePlayer();
   };
   const row = h("tr", { class: "player-row" },
-    h("td", { colspan: "13" }, h("div", { class: "player" },
+    h("td", { colspan: "14" }, h("div", { class: "player" },
       pp, cur, range, dur, h("span", { class: "hint" }, "Space play/pause · Esc close"))));
   tr.after(row);
   const playBtn = tr.querySelector(".play-btn");

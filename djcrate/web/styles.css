@@ -513,6 +513,19 @@ table.timeline { width: 100%; border-collapse: collapse; margin-top: 14px; table
 .docs .diagram .line code { display: block; margin-top: 2px; width: fit-content; }
 .docs .diagram .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
 
+/* ------------------------------------------------ Rekordbox My Tags (read-only) */
+.c-mytags { width: 150px; }
+.mytag-cell { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; min-width: 0; overflow: hidden; }
+.mytag {
+  display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap;
+  background: transparent; color: var(--muted); border: 1px solid var(--line); cursor: pointer; max-width: 110px;
+  overflow: hidden; text-overflow: ellipsis; font: inherit; font-size: 11px;
+}
+.mytag:hover { color: var(--text); border-color: var(--accent-2); }
+.mytag.on { color: var(--accent-2); border-color: var(--accent-2); }
+#btn-mytags.active { border-color: var(--accent-2); color: var(--accent-2); }
+body.no-mytags .c-mytags, body.no-mytags .mytags-only { display: none; }
+
 /* ------------------------------------------------ genres */
 .c-genre { width: 140px; }
 .genre-cell { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; min-width: 0; overflow: hidden; }

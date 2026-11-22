@@ -7,6 +7,7 @@ export const store = {
   tracks: [],        // tracks in the current view
   genres: null,      // last /api/genres (the Genre Rack)
   rack: { sub: true, artist: "", name: "", others: false }, // Genre Rack view options
+  mytag: null,       // Rekordbox My Tag filter (read-only tags), or null
 };
 
 const listeners = {};

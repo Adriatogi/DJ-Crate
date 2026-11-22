@@ -20,7 +20,7 @@
   <div class="box top"><b>DJ Crate</b><span>find · download · catalogue · samples · plan sets</span></div>
   <div class="lines">
     <div class="line down"><span class="arrow">▼</span><div><b>Crates &amp; sets → playlists</b><code>DJ Crate for Rekordbox.xml</code></div></div>
-    <div class="line up"><span class="arrow">▲</span><div><b>BPM &amp; key</b><code>rekordbox.xml</code> (your export)</div></div>
+    <div class="line up"><span class="arrow">▲</span><div><b>BPM, key &amp; My Tags</b><code>rekordbox.xml</code> (your export)</div></div>
   </div>
   <div class="box bottom"><b>Rekordbox</b><span>analyse · fix BPM &amp; grids · cues · USB · play</span></div>
   <div class="foot">Both use the same MP3s in your library folder, which is the single source of truth.</div>
@@ -34,6 +34,7 @@
   <tr><td>Set Setter: planning sets</td><td>Actually mixing</td></tr>
 </table>
 <p>Rekordbox never pulls changes by itself. DJ Crate writes and updates its file by itself (you never make or edit it); you only import the playlists in Rekordbox. BPM, key, grids and cues are <b>never</b> sent from DJ Crate to Rekordbox, so nothing in Rekordbox can be overwritten with worse data. Songs are matched by file path, so you don't get duplicates. Set it up under <a href="#" data-tab="settings">Settings → Rekordbox</a>.</p>
+<p><b>My Tags</b> stay Rekordbox's: DJ Crate can show them but <b>never edits them</b>. Writing to Rekordbox's own data can corrupt it, so they come in read-only through the XML export. Rekordbox only puts them there if you turn on its setting that adds My Tags to Comments (each song's Comments then starts like <code>/* Hype / Vocal */</code>). Then they show as a My Tags column, on each song's card, and in the My Tags filter button. To change a tag, change it in Rekordbox and export again. Editing that comment text elsewhere won't change the real My Tag.</p>
 
 <h2 id="crates">Crates</h2>
 <ul>

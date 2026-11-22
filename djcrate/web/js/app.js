@@ -65,6 +65,8 @@ async function poll() {
   failures = 0;
   const prev = store.status;
   store.status = s;
+  // The My Tags column and filter only show once some song has My Tags from Rekordbox (or a filter is on).
+  document.body.classList.toggle("no-mytags", !(s.rekordbox?.mytags || store.mytag));
   if (s.spotify.connected) everConnected = true;
   const libStatus = s.library.status;
   if (libStatus !== lastLibraryStatus) {

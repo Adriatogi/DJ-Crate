@@ -8,7 +8,7 @@ import { genreControl } from "./genrepicker.js";
 import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
 import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast } from "./ui.js";
-import { relocateTrack, updateTrack } from "./tracks.js";
+import { mytagChips, relocateTrack, updateTrack } from "./tracks.js";
 
 function current() {
   return store.tracks.find((t) => t.id === store.detailId) || null;
@@ -76,6 +76,8 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
     h("div", { class: "field" }, h("label", {}, "Genre"), genreControl(t, { onSaved, max: 6 }),
       t.genres.length ? h("div", { class: "muted small", style: { marginTop: "4px" } },
         `Written into the MP3 as “${t.genre_tag}”. In Rekordbox: right-click the song → Reload Tag.`) : null),
+    t.mytags?.length ? h("div", { class: "field" }, h("label", {}, "My Tags (from Rekordbox)"), mytagChips(t, { all: true }),
+      h("div", { class: "muted small", style: { marginTop: "4px" } }, "Read-only. Edit them in Rekordbox, then export the XML again.")) : null,
     cleanSection(t),
     field("Notes", "notes", { multiline: true, placeholder: "Anything about this song — drop at 1:04, vocal comes in late, pairs well with…" }),
     samplesSection(t, { openSong, openTitle, onChange: onSamplesChange }),
