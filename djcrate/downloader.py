@@ -6,6 +6,7 @@ and Cancel can kill a download immediately. Files are built in
 so Rekordbox never sees a half-written file.
 """
 
+import json
 import logging
 import os
 import re
@@ -39,6 +40,7 @@ ERROR_MESSAGES = {
     "unavailable": "Video unavailable (removed, private or blocked in your country) — paste a new link.",
     "needs_cookies": "YouTube wants you signed in (age-restricted or bot check). Turn on Settings → Use cookies from browser, then Retry.",
     "ytdlp_outdated": "YouTube changed something and the downloader needs an update. Click Update yt-dlp, then Retry.",
+    "no_formats": "YouTube didn't offer any audio to download for this video. Retry later, or paste a different link for this song.",
     "transient": "Network problem while downloading.",
     "rate_limited": "YouTube is rate-limiting you right now — wait a few minutes.",
     "forbidden": "YouTube refused the download (HTTP 403).",
@@ -66,9 +68,12 @@ _PATTERNS: list[tuple[str, tuple[str, ...]]] = [
         "members-only", "join this channel", "http error 404", "this track is not available", "premieres in",
         "this live event will begin",
     )),
+    # YouTube handed out no audio formats. Usually not an old yt-dlp: browser cookies (YouTube serves
+    # signed-in sessions differently) or a missing JavaScript runtime. See _no_formats_message.
+    ("no_formats", ("requested format is not available",)),
     ("ytdlp_outdated", (
         "nsig extraction failed", "signature extraction failed", "unable to extract", "please report this issue",
-        "requested format is not available", "n challenge", "failed to extract any player response",
+        "n challenge", "failed to extract any player response",
         "unable to download api page",
     )),
     ("forbidden", ("http error 403",)),
@@ -94,6 +99,18 @@ def friendly(code: str, detail: str = "") -> str:
     if code == "unknown" and detail:
         msg = f"Download failed: {detail[:300]}"
     return msg
+
+
+def _no_formats_message(lines: list[str], cookies: str) -> str:
+    """Why YouTube offered no audio, from yt-dlp's warnings, and what to do."""
+    low = "\n".join(lines).lower()
+    if "javascript runtime" in low or "js runtime" in low or not tools.js_runtime():
+        return ("YouTube didn't offer any audio because no JavaScript runtime was found. "
+                "Run: brew install deno, then Re-check in Settings and Retry.")
+    if cookies:
+        return ("YouTube didn't offer any audio for this video while signed in with your browser cookies "
+                "(it was also tried without them). Retry later, or paste a different link.")
+    return ERROR_MESSAGES["no_formats"]
 
 
 def valid_link(url: str) -> bool:
@@ -189,14 +206,16 @@ class DownloadManager:
 
     # ------------------------------------------------------------ public API
 
-    def enqueue(self, conn, track_ids: list[int], replace: bool = False) -> dict:
+    def enqueue(self, conn, track_ids: list[int], replace: bool = False, swaps: dict | None = None) -> dict:
+        """swaps: {track id: (url, on_done)} downloads that link instead; on_done is applied once the file is in."""
         queued, skipped = 0, []
+        swaps = swaps or {}
         with db.tx(conn):
             for tid in track_ids:
                 t = conn.execute("SELECT id, title, source_url, download_status FROM tracks WHERE id = ?", (tid,)).fetchone()
                 if not t:
                     continue
-                if not (t["source_url"] or "").strip():
+                if not (t["source_url"] or "").strip() and tid not in swaps:
                     skipped.append({"track_id": tid, "title": t["title"], "reason": "No link"})
                     continue
                 active = conn.execute(
@@ -207,7 +226,9 @@ class DownloadManager:
                     skipped.append({"track_id": tid, "title": t["title"], "reason": "Already queued"})
                     continue
                 conn.execute("UPDATE jobs SET status = 'dismissed' WHERE track_id = ? AND status = 'failed'", (tid,))
-                conn.execute("INSERT INTO jobs (track_id, replace_file) VALUES (?, ?)", (tid, int(replace or t["download_status"] in ("done", "missing"))))
+                url, on_done = swaps.get(tid, (None, None))
+                conn.execute("INSERT INTO jobs (track_id, replace_file, url, on_done) VALUES (?, ?, ?, ?)",
+                             (tid, int(replace or t["download_status"] in ("done", "missing")), url, json.dumps(on_done) if on_done else None))
                 conn.execute("UPDATE tracks SET download_status = 'queued', error_code = NULL, error_msg = NULL WHERE id = ?", (tid,))
                 queued += 1
         self.wake()
@@ -347,14 +368,24 @@ class DownloadManager:
             if not track:
                 self._set_job(job_id, status="cancelled")
                 return
-            url = (track["source_url"] or "").strip()
+            # A version swap downloads the other copy's link; the song only switches to it once it's in.
+            url = (job.get("url") or track["source_url"] or "").strip()
             if not url:
                 raise _Failure("no_link", "")
             if not valid_link(url):
                 raise _Failure("invalid_url", url)
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir(parents=True)
-            mp3 = self._fetch(job_id, url, tmp, cookies)
+            try:
+                mp3 = self._fetch(job_id, url, tmp, cookies)
+            except _Failure as f:
+                if f.code != "no_formats" or not cookies:
+                    raise
+                # Signed-in sessions sometimes get no formats where a plain request does: try once without cookies.
+                log.info("Job %s: no formats with cookies, trying without", job_id)
+                shutil.rmtree(tmp, ignore_errors=True)
+                tmp.mkdir(parents=True)
+                mp3 = self._fetch(job_id, url, tmp, "")
             self._finish(job, track, mp3)
         except _Cancelled:
             log.info("Job %s cancelled", job_id)
@@ -374,7 +405,7 @@ class DownloadManager:
             finally:
                 conn.close()
         except _Failure as f:
-            self._fail(job, f.code, f.detail)
+            self._fail(job, f.code, f.detail, f.message)
         except OSError as e:
             code = "disk_full" if e.errno == 28 else "unknown"
             log.exception("Job %s failed with OSError", job_id)
@@ -428,7 +459,7 @@ class DownloadManager:
             code = classify_error("\n".join(lines))
             if code in ("disk_full", "ffmpeg_missing"):
                 raise _Requeue(code)
-            raise _Failure(code, detail)
+            raise _Failure(code, detail, _no_formats_message(lines, cookies) if code == "no_formats" else None)
         sources = [p for p in tmp.glob("source.*") if p.suffix not in (".part", ".ytdl")]
         if not sources:
             raise _Failure("unknown", "yt-dlp finished but no audio file was produced: " + _error_detail(lines))
@@ -489,6 +520,11 @@ class DownloadManager:
                     "error_msg = NULL, tag_error = ?, updated_at = datetime('now') WHERE id = ?",
                     (self.state.rel_path(dest), dur, tag_error, track["id"]),
                 )
+                if job.get("on_done"):
+                    # The new copy is in: now the song points at its link, with its clean/explicit label.
+                    done = json.loads(job["on_done"])
+                    conn.execute("UPDATE tracks SET source_url = ?, clean_url = ?, clean_check = ?, clean_checked_at = ? WHERE id = ?",
+                                 (job["url"], job["url"], json.dumps(done["clean_check"]), done["clean_check"].get("checked_at"), track["id"]))
                 conn.execute("UPDATE jobs SET status = 'done', progress = 1, stage = '', updated_at = datetime('now') WHERE id = ?", (job_id,))
         finally:
             conn.close()
@@ -505,7 +541,7 @@ class DownloadManager:
             log.warning("Cover art fetch failed (%s); saving without artwork", e)
             return None, "image/jpeg"
 
-    def _fail(self, job: dict, code: str, detail: str):
+    def _fail(self, job: dict, code: str, detail: str, message: str | None = None):
         attempts = job["attempts"] + 1
         retryable = code in ("transient", "forbidden", "rate_limited") and attempts <= len(RETRY_DELAYS)
         if code == "forbidden" and not retryable:
@@ -523,7 +559,9 @@ class DownloadManager:
                     )
                     conn.execute("UPDATE tracks SET download_status = 'queued' WHERE id = ?", (job["track_id"],))
                 else:
-                    msg = friendly(code, detail)
+                    msg = message or friendly(code, detail)
+                    if job.get("on_done"):
+                        msg = f"Swap not done: the file and its link are unchanged. {msg}"
                     conn.execute(
                         "UPDATE jobs SET status = 'failed', attempts = ?, error_code = ?, error_msg = ?, stage = '', "
                         "updated_at = datetime('now') WHERE id = ?",
@@ -542,7 +580,8 @@ class DownloadManager:
 
 
 class _Failure(Exception):
-    def __init__(self, code: str, detail: str):
+    def __init__(self, code: str, detail: str, message: str | None = None):
         super().__init__(detail)
         self.code = code
         self.detail = detail
+        self.message = message   # a specific explanation, instead of the code's usual one

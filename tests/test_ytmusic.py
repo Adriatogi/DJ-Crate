@@ -268,3 +268,47 @@ def test_explicit_song_can_swap_to_clean(client, lib, ytm):
     t = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "clean"}).json()["tracks"][0]
     assert t["source_url"] == ytmusic.watch_url(CLEAN) and t["clean_flag"]
     assert client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "sideways"}).json()["error"]["code"] == "bad_request"
+
+
+def test_swap_of_a_downloaded_song_only_switches_once_the_new_file_is_in(client, lib, ytm, make_mp3, monkeypatch):
+    """A failed download of the explicit copy must not relabel the (still clean) file as explicit."""
+    from djcrate import downloader
+    from djcrate.downloader import DownloadManager, _Failure
+    monkeypatch.setattr("djcrate.tools.ffmpeg_dir", lambda: "/opt/homebrew/bin")
+    monkeypatch.setattr("djcrate.tools.online", lambda max_age=10: True)
+    monkeypatch.setattr("djcrate.library.send2trash", lambda p: __import__("os").remove(p))
+    tid = add(client, f"https://youtu.be/{CLEAN}")
+    make_mp3(lib.library / "x.mp3")
+    lib.conn().execute("UPDATE tracks SET download_status = 'done', file_rel_path = 'x.mp3' WHERE id = ?", (tid,))
+    cleancheck.Checker(lib).step()
+    dm = DownloadManager(lib)
+    monkeypatch.setattr("djcrate.api.downloads", dm)
+
+    r = client.post("/api/tracks/swap_version", json={"ids": [tid], "to": "explicit"}).json()
+    assert r["pending"] == 1 and r["queued"] == 1
+    t = client.get(f"/api/tracks/{tid}").json()["track"]
+    assert t["source_url"] == f"https://youtu.be/{CLEAN}" and t["clean_flag"]       # unchanged until downloaded
+    row = next(x for x in client.get("/api/tracks").json()["tracks"] if x["id"] == tid)
+    assert row["job_url"] == ytmusic.watch_url(EXPL) and row["job_status"] == "queued"
+
+    # The download fails: still the clean file, still labelled clean, with a clear message.
+    fetched = []
+    def fail(job_id, url, tmp, cookies):
+        fetched.append(url)
+        raise _Failure("no_formats", "Requested format is not available", "YouTube didn't offer any audio.")
+    monkeypatch.setattr(dm, "_fetch", fail)
+    dm._run(dm._claim())
+    assert fetched == [ytmusic.watch_url(EXPL)]
+    t = client.get(f"/api/tracks/{tid}").json()["track"]
+    assert t["source_url"] == f"https://youtu.be/{CLEAN}" and t["clean_flag"] and t["download_status"] == "done"
+    job = lib.conn().execute("SELECT * FROM jobs WHERE track_id = ?", (tid,)).fetchone()
+    assert job["status"] == "failed" and job["error_msg"].startswith("Swap not done")
+
+    # Retry succeeds: now it's the explicit copy.
+    dm.retry(lib.conn(), [job["id"]])
+    monkeypatch.setattr(dm, "_fetch", lambda job_id, url, tmp, cookies: make_mp3(tmp / "audio.mp3"))
+    dm._run(dm._claim())
+    t = client.get(f"/api/tracks/{tid}").json()["track"]
+    assert t["source_url"] == ytmusic.watch_url(EXPL) and not t["clean_flag"] and t["clean"]["result"] == "explicit"
+    assert t["clean"]["clean_twin"]["video_id"] == CLEAN and t["download_status"] == "done"
+    assert not cleancheck.due_count(lib.conn())   # recorded for the new link, nothing to re-check

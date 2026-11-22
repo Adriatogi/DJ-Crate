@@ -342,6 +342,14 @@ MIGRATIONS.append(  # v13: the Genre Rack is gone for now: its genres, song genr
     """
 )
 
+MIGRATIONS.append(  # v14: a download can be for a different link than the song's (swapping versions):
+    # the song only switches to that link, and its clean/explicit label, once the new file is in.
+    """
+    ALTER TABLE jobs ADD COLUMN url TEXT;
+    ALTER TABLE jobs ADD COLUMN on_done TEXT
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 # The song's current link is the clean copy of a song YouTube Music also has as explicit.

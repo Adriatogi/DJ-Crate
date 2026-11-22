@@ -50,6 +50,7 @@ export async function swapVersion(tracks, to, { ask = true } = {}) {
       (one ? `The link changes to:\n${twinLine(otherCopy(list[0]).copy)}\n\n` : `Each song's link changes to its ${to} copy on YouTube Music.\n\n`) +
       (files
         ? `${files === list.length ? (one ? "It" : "They") : `${files} of them`} will be downloaded again to the same file, so Rekordbox keeps its link. ` +
+          "The song switches over once the new file is in; if the download fails, nothing changes. " +
           "If you've set cues or a beatgrid in Rekordbox, check they still line up."
         : "Download when you're ready."),
       { ok: one ? "Swap" : `Swap ${list.length}` });
@@ -58,8 +59,11 @@ export async function swapVersion(tracks, to, { ask = true } = {}) {
   try {
     const r = await post("/api/tracks/swap_version", { ids: list.map((t) => t.id), to });
     r.tracks.forEach((t) => emit("track-changed", t));
-    toast(`Swapped ${r.swapped} song${r.swapped === 1 ? "" : "s"} to the ${to} version` +
-      (r.queued ? `. Downloading ${r.queued === 1 ? "it" : r.queued} again.` : "."), { type: "success" });
+    const n = (k) => `${k} song${k === 1 ? "" : "s"}`;
+    toast(r.pending
+      ? `Downloading the ${to} version of ${n(r.pending)}. ${r.pending === 1 ? "It switches" : "They switch"} over once downloaded.`
+      : `Swapped ${n(r.swapped)} to the ${to} version${r.queued ? `. Downloading ${r.queued === 1 ? "it" : r.queued} again.` : "."}`,
+      { type: "success" });
     emit("refresh-tracks");
     emit("refresh-sidebar");
   } catch (e) { errorToast(e); }
@@ -86,6 +90,9 @@ export function cleanSection(t) {
   const again = h("button", { class: "btn small" }, c ? "Check again" : "Check now");
   again.addEventListener("click", () => checkNow(t, again));
   const other = otherCopy(t);
+  // A swap waiting on its download (the song switches once the file is in), or one that failed.
+  const swapping = t.job_url && t.job_url !== t.source_url && ["queued", "running", "interrupted"].includes(t.job_status);
+  const swapFailed = t.job_url && t.job_url !== t.source_url && t.job_status === "failed";
   let text;
   if (!c) text = "Not checked yet. DJ Crate checks songs in the background.";
   else if (c.result === "clean") text = c.swapped_from ? "Clean version (swapped from the explicit one)." : "Clean version.";
@@ -94,12 +101,18 @@ export function cleanSection(t) {
   else if (c.result === "no_explicit") text = c.official ? "YouTube Music has no explicit version of this song." : "Not a YouTube Music track, so its version can't be checked.";
   else text = "Couldn't check this link. It will try again later.";
   const label = other ? `${other.to === "explicit" ? (c.result === "unofficial" ? "Official explicit" : "Explicit") : "Clean"} copy on YouTube Music: ` : null;
+  const note = swapping ? h("div", { class: "small", style: { color: "var(--accent-2)" } },
+      `Downloading the ${other?.to || "other"} version… This song switches over once it's downloaded.`)
+    : swapFailed ? h("div", { class: "small", style: { color: "var(--red)" } },
+      `The ${other?.to || "other"} version couldn't be downloaded, so this is still the version described above. ${t.job_error || ""}`)
+    : null;
   return [
     h("div", { class: "section-title" }, "Clean or explicit"),
     h("div", { class: "small" }, text),
+    note,
     other ? h("div", { class: "muted small" }, label, twinLine(other.copy)) : null,
     h("div", { class: "row gap", style: { flexWrap: "wrap", marginTop: "6px" } },
-      other ? h("button", { class: "btn small", onclick: () => swapVersion([t], other.to) }, `Swap to ${other.to}`) : null,
+      other && !swapping ? h("button", { class: "btn small", onclick: () => swapVersion([t], other.to) }, swapFailed ? `Try the ${other.to} version again` : `Swap to ${other.to}`) : null,
       again),
   ];
 }

@@ -511,7 +511,8 @@ def restore_tracks_to_crate(crate_id: int, body: RestoreRows, conn=Depends(get_c
 # ---------------------------------------------------------------- tracks
 
 JOB_JOIN = """
-LEFT JOIN (SELECT track_id, id job_id, status job_status, progress job_progress, stage job_stage, error_msg job_error
+LEFT JOIN (SELECT track_id, id job_id, status job_status, progress job_progress, stage job_stage, error_msg job_error,
+                  url job_url
            FROM jobs WHERE id IN (SELECT max(id) FROM jobs WHERE status IN ('queued','running','interrupted','failed') GROUP BY track_id)
           ) j ON j.track_id = t.id
 """
@@ -702,11 +703,14 @@ def _other_copy(t: dict, to: str) -> dict | None:
 
 @app.post("/api/tracks/swap_version")
 def swap_version(body: SwapBody, conn=Depends(get_conn)):
-    """Point each song at its explicit (or clean) copy on YouTube Music and re-download songs that already
-    have a file. Same file path, so Rekordbox keeps its link (as with any re-download)."""
+    """Swap songs to their explicit (or clean) copy on YouTube Music.
+
+    A song with a downloaded file keeps its link and label until the other copy has downloaded (same file
+    path, so Rekordbox keeps its link); if that download fails, nothing changes, because the file is still the
+    old version. A song without a file switches its link right away (and downloads if it was missing or failed)."""
     if body.to not in ("explicit", "clean"):
         raise AppError("bad_request", "Swap to explicit or clean.")
-    swapped, to_download = [], []
+    swapped, to_download, pending = [], [], {}
     with db.tx(conn):
         for tid in body.ids:
             t = db.get_track(conn, tid)
@@ -722,13 +726,19 @@ def swap_version(body: SwapBody, conn=Depends(get_conn)):
                       "swapped_from": t["source_url"], "v": ytmusic.RULES}
             if mine_info and (t["clean"] or {}).get("official"):
                 result["twin" if body.to == "clean" else "clean_twin"] = mine_info
+            swapped.append(tid)
+            if t["download_status"] == "done":
+                pending[tid] = (url, {"clean_check": result})   # switches once the new file is in
+                continue
             conn.execute("UPDATE tracks SET source_url = ?, clean_url = ?, clean_check = ?, clean_checked_at = ?, "
                          "updated_at = datetime('now') WHERE id = ?", (url, url, json.dumps(result), result["checked_at"], tid))
-            swapped.append(tid)
-            if t["download_status"] in ("done", "missing", "error"):
+            if t["download_status"] in ("missing", "error"):
                 to_download.append(tid)
     queued = downloads.enqueue(conn, to_download, replace=True)["queued"] if to_download else 0
-    return {"swapped": len(swapped), "queued": queued, "tracks": [db.get_track(conn, tid) for tid in swapped]}
+    if pending:
+        queued += downloads.enqueue(conn, list(pending), replace=True, swaps=pending)["queued"]
+    return {"swapped": len(swapped), "queued": queued, "pending": len(pending),
+            "tracks": [db.get_track(conn, tid) for tid in swapped]}
 
 
 class CleanOnBody(BaseModel):
@@ -1471,7 +1481,7 @@ def update_ytdlp():
     if result["ok"] and state.status == "ok":
         conn = state.conn()
         try:
-            ids = [r["id"] for r in conn.execute("SELECT id FROM jobs WHERE status = 'failed' AND error_code IN ('ytdlp_outdated', 'forbidden')")]
+            ids = [r["id"] for r in conn.execute("SELECT id FROM jobs WHERE status = 'failed' AND error_code IN ('ytdlp_outdated', 'forbidden', 'no_formats')")]
             result["retried"] = downloads.retry(conn, ids) if ids else 0
         finally:
             conn.close()

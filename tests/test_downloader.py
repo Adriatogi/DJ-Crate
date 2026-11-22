@@ -179,3 +179,29 @@ def test_status_reports_overall_progress(client, lib):
     _job(conn, tid, "queued")
     q = client.get("/api/status").json()["queue"]
     assert q["batch"]["total"] == 1 and q["last_batch"] is None
+
+
+def test_no_formats_is_not_called_outdated(monkeypatch):
+    assert downloader.classify_error("ERROR: [youtube] x: Requested format is not available. Use --list-formats") == "no_formats"
+    monkeypatch.setattr("djcrate.tools.js_runtime", lambda: "deno")
+    assert "different link" in downloader._no_formats_message(["ERROR: Requested format is not available"], "")
+    assert "cookies" in downloader._no_formats_message([], "chrome")
+    monkeypatch.setattr("djcrate.tools.js_runtime", lambda: None)
+    assert "brew install deno" in downloader._no_formats_message([], "")
+
+
+def test_no_formats_with_cookies_tries_once_without(dm, lib, make_mp3, monkeypatch):
+    conn, tid = add_track(lib)
+    db.set_setting(conn, "cookies_browser", "chrome")
+    tried = []
+
+    def fetch(job_id, url, tmp, cookies):
+        tried.append(cookies)
+        if cookies:
+            raise _Failure("no_formats", "Requested format is not available")
+        return make_mp3(tmp / "audio.mp3")
+
+    monkeypatch.setattr(dm, "_fetch", fetch)
+    dm.enqueue(conn, [tid])
+    run_one(dm)
+    assert tried == ["chrome", ""] and db.get_track(conn, tid)["download_status"] == "done"
