@@ -2,7 +2,7 @@
 // multi-select (checkboxes only — no Shift-click ranges) and bulk actions.
 
 import { get, native, patch, post } from "./api.js";
-import { cleanBadge, findTag, otherCopy, swapVersion } from "./cleanver.js";
+import { cleanBadge, findTag, otherCopy, swapOwed, swapVersion } from "./cleanver.js";
 import { drag } from "./sidebar.js";
 import { LINK_RE, emit, flatCrates, findCrate, on, store } from "./store.js";
 import {
@@ -233,6 +233,9 @@ function statusCell(t) {
     chips.push(h("div", { class: "status-stack", style: { width: "100%" } },
       h("span", { class: "chip busy" }, stage),
       h("div", { class: "progress" }, h("div", { style: { width: `${pct}%` } }))));
+  } else if (s === "done" && swapOwed(t)) {
+    chips.push(h("span", { class: "chip warn", title: `${t.job_error || "The download failed."}\nThe file is still the old version. Download to try again.` },
+      `${swapOwed(t).to[0].toUpperCase()}${swapOwed(t).to.slice(1)} not downloaded`));
   } else if (s === "done") {
     chips.push(h("span", { class: "chip ok" }, "✓ Downloaded"));
   } else if (s === "error") {
@@ -274,6 +277,10 @@ function actionButton(t) {
   }
   if (s === "missing") {
     return h("button", { class: "btn small", onclick: (e) => { e.stopPropagation(); relocateTrack(t); } }, "Relocate…");
+  }
+  if (s === "done" && swapOwed(t)) {
+    return h("button", { class: "btn small primary", title: `Try downloading the ${swapOwed(t).to} version again`,
+      onclick: (e) => { e.stopPropagation(); startDownloads([t.id]); } }, "Download");
   }
   if (s === "done") {
     return h("button", {

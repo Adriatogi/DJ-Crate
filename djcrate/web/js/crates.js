@@ -1,6 +1,6 @@
 // Crates tab controller: which view is selected, toolbar, loading data.
 
-import { swapVersion } from "./cleanver.js";
+import { swapOwed, swapVersion } from "./cleanver.js";
 import { get, post } from "./api.js";
 import { autoRelocate, initImporters } from "./importers.js";
 import { closeDetail, initDetail } from "./detail.js";
@@ -168,7 +168,7 @@ function renderToolbar() {
   const swapAll = document.getElementById("btn-swap-all");
   swapAll.hidden = !flagged.length;
   swapAll.textContent = `Swap all to explicit (${flagged.length})`;
-  const toDownload = ts.filter((t) => t.source_url && ["none", "error"].includes(t.download_status)).length;
+  const toDownload = ts.filter((t) => (t.source_url && ["none", "error"].includes(t.download_status)) || swapOwed(t)).length;
   const inTrash = store.view === "smart:trash";
   const empty = document.getElementById("btn-empty-trash");
   empty.hidden = !inTrash || !ts.length;

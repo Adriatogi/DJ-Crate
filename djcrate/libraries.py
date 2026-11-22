@@ -62,7 +62,10 @@ def _peek(path: Path) -> tuple[str | None, int | None]:
         conn = sqlite3.connect(f"file:{db_path}?immutable=1", uri=True)
         try:
             row = conn.execute("SELECT value FROM settings WHERE key = 'library_name'").fetchone()
-            count = conn.execute("SELECT count(*) FROM tracks").fetchone()[0]
+            try:   # songs in the Trash or hidden don't count, as everywhere else
+                count = conn.execute("SELECT count(*) FROM tracks WHERE trashed_at IS NULL AND hidden_at IS NULL").fetchone()[0]
+            except sqlite3.OperationalError:   # a library from before Trash/Hidden existed
+                count = conn.execute("SELECT count(*) FROM tracks").fetchone()[0]
             return (row[0] if row and row[0] else None), count
         finally:
             conn.close()

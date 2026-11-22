@@ -394,10 +394,14 @@ BINS: dict[str, tuple[str, str]] = {
     "trash": ("Trash", "t.trashed_at IS NOT NULL"),
 }
 
+# A swap to the other version whose download failed: the song still has its old file, and the new copy is owed.
+FAILED_SWAP_SQL = ("EXISTS (SELECT 1 FROM jobs j WHERE j.track_id = t.id AND j.status = 'failed' "
+                   "AND j.url IS NOT NULL AND j.url <> coalesce(t.source_url, ''))")
+
 SMART_CRATES: dict[str, tuple[str, str]] = {
     "all": ("All Tracks", "1"),
     "needs_link": ("Needs Link", "(coalesce(t.source_url, '') = '' AND t.download_status NOT IN ('done', 'missing'))"),
-    "to_download": ("Ready to Download", "(coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error'))"),
+    "to_download": ("Ready to Download", f"((coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error')) OR {FAILED_SWAP_SQL})"),
     "downloaded": ("Downloaded", "t.download_status = 'done'"),
     "check_version": ("Check Version", CHECK_VERSION_SQL),
     "clean_versions": ("Clean Versions", CLEAN_SQL),

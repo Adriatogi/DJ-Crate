@@ -897,7 +897,8 @@ def download_all(body: ViewBody, conn=Depends(get_conn)):
     if body.view.split(":", 1)[-1] in db.BINS:
         return {"queued": 0, "skipped": []}
     tracks = list_tracks(body.view, "", conn=conn)["tracks"]
-    ids = [t["id"] for t in tracks if (t["source_url"] or "") and t["download_status"] in ("none", "error")]
+    owed = lambda t: t.get("job_status") == "failed" and t.get("job_url") and t["job_url"] != t["source_url"]   # a failed swap
+    ids = [t["id"] for t in tracks if ((t["source_url"] or "") and t["download_status"] in ("none", "error")) or owed(t)]
     if not ids:
         return {"queued": 0, "skipped": []}
     return downloads.enqueue(conn, ids)

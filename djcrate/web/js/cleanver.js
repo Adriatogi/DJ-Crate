@@ -18,6 +18,12 @@ export function otherCopy(t) {
   return null;
 }
 
+// A swap whose download failed: the song keeps its old file, and the other version is still to download.
+export function swapOwed(t) {
+  if (!(t.job_url && t.job_url !== t.source_url && t.job_status === "failed")) return null;
+  return { to: otherCopy(t)?.to || "other" };
+}
+
 // The neutral “Clean” label next to a title. Only for clean copies; null otherwise.
 export function cleanBadge(t) {
   if (!t.clean_flag) return null;

@@ -148,3 +148,13 @@ def test_not_in_a_crate_lists_loose_songs(client, lib):
     assert counts(client)["no_crate"] == 2
     client.post("/api/tracks/trash", json={"ids": [loose, removed]})
     assert not ids(client, "smart:no_crate") and ids(client, "smart:all") == {kept}
+
+
+def test_library_picker_count_skips_trash_and_hidden(lib):
+    from djcrate import libraries
+    a, b, c = add(lib, "One"), add(lib, "Two"), add(lib, "Three")
+    conn = lib.conn()
+    conn.execute("UPDATE tracks SET trashed_at = 1 WHERE id = ?", (b,))
+    conn.execute("UPDATE tracks SET hidden_at = 1 WHERE id = ?", (c,))
+    conn.close()
+    assert libraries._peek(lib.library)[1] == 1

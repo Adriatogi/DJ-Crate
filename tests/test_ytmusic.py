@@ -304,10 +304,19 @@ def test_swap_of_a_downloaded_song_only_switches_once_the_new_file_is_in(client,
     job = lib.conn().execute("SELECT * FROM jobs WHERE track_id = ?", (tid,)).fetchone()
     assert job["status"] == "failed" and job["error_msg"].startswith("Swap not done")
 
-    # Retry succeeds: now it's the explicit copy.
-    dm.retry(lib.conn(), [job["id"]])
-    monkeypatch.setattr(dm, "_fetch", lambda job_id, url, tmp, cookies: make_mp3(tmp / "audio.mp3"))
+    # It owes a download, so it's in Ready to Download, and Download All retries the swap (not the old link).
+    assert tid in {x["id"] for x in client.get("/api/tracks?view=smart:to_download").json()["tracks"]}
+    assert {x["key"]: x["count"] for x in client.get("/api/sidebar").json()["smart"]}["to_download"] == 1
+    assert client.post("/api/downloads/all", json={"view": "smart:to_download"}).json()["queued"] == 1
+    assert lib.conn().execute("SELECT count(*) FROM jobs WHERE track_id = ?", (tid,)).fetchone()[0] == 1  # same job, retried
+    got = []
+    def ok(job_id, url, tmp, cookies):
+        got.append(url)
+        return make_mp3(tmp / "audio.mp3")
+    monkeypatch.setattr(dm, "_fetch", ok)
     dm._run(dm._claim())
+    assert got == [ytmusic.watch_url(EXPL)]
+    assert not client.get("/api/tracks?view=smart:to_download").json()["tracks"]
     t = client.get(f"/api/tracks/{tid}").json()["track"]
     assert t["source_url"] == ytmusic.watch_url(EXPL) and not t["clean_flag"] and t["clean"]["result"] == "explicit"
     assert t["clean"]["clean_twin"]["video_id"] == CLEAN and t["download_status"] == "done"

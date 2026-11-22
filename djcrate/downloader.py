@@ -225,6 +225,16 @@ class DownloadManager:
                 if active:
                     skipped.append({"track_id": tid, "title": t["title"], "reason": "Already queued"})
                     continue
+                swap = conn.execute(
+                    "SELECT id FROM jobs WHERE track_id = ? AND status = 'failed' AND url IS NOT NULL AND url <> coalesce(?, '') "
+                    "ORDER BY id DESC LIMIT 1", (tid, t["source_url"])).fetchone()
+                if swap and tid not in swaps:
+                    # The song owes a swap to its other version: downloading it means trying that swap again.
+                    conn.execute("UPDATE jobs SET status = 'queued', attempts = 0, next_attempt_at = 0, error_code = NULL, error_msg = NULL, "
+                                 "progress = 0, stage = '', updated_at = datetime('now') WHERE id = ?", (swap["id"],))
+                    conn.execute("UPDATE tracks SET download_status = 'queued', error_code = NULL, error_msg = NULL WHERE id = ?", (tid,))
+                    queued += 1
+                    continue
                 conn.execute("UPDATE jobs SET status = 'dismissed' WHERE track_id = ? AND status = 'failed'", (tid,))
                 url, on_done = swaps.get(tid, (None, None))
                 conn.execute("INSERT INTO jobs (track_id, replace_file, url, on_done) VALUES (?, ?, ?, ?)",
