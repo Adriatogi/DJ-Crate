@@ -6,8 +6,8 @@ import { autoRelocate, initImporters } from "./importers.js";
 import { closeDetail, initDetail } from "./detail.js";
 import { crateMenu, deleteCrate, initSidebar, renderSidebar } from "./sidebar.js";
 import { emit, findCrate, on, store } from "./store.js";
-import { deleteForGood, initTracks, renderTracks, resetTable } from "./tracks.js";
-import { debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
+import { deleteForGood, initTracks, moveToTrash, renderTracks, resetTable } from "./tracks.js";
+import { confirmDialog, debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
 
 let loadSeq = 0;
 
@@ -172,6 +172,9 @@ function renderToolbar() {
   const inTrash = store.view === "smart:trash";
   const empty = document.getElementById("btn-empty-trash");
   empty.hidden = !inTrash || !ts.length;
+  const loose = document.getElementById("btn-trash-loose");
+  loose.hidden = store.view !== "smart:no_crate" || !ts.length;
+  loose.textContent = `Move all ${ts.length} to Trash`;
   const dl = document.getElementById("btn-download-all");
   dl.hidden = inTrash || store.view === "smart:hidden";
   dl.textContent = toDownload ? `⬇ Download All (${toDownload})` : "⬇ Download All";
@@ -231,6 +234,13 @@ export function initCrates() {
     const search = document.getElementById("search");
     if (search.value || store.mytag) { search.value = ""; store.mytag = null; renderMytagButton(); await refreshTracks(); }
     deleteForGood([], { all: true });
+  };
+  document.getElementById("btn-trash-loose").onclick = async () => {
+    const ids = store.tracks.map((t) => t.id);
+    const ok = await confirmDialog(`Move ${ids.length} song${ids.length === 1 ? "" : "s"} to the Trash?`,
+      "These songs aren't in any crate. They'll leave All Tracks and every count; restore any of them from the Trash. Nothing is deleted until you empty the Trash.",
+      { ok: "Move to Trash" });
+    if (ok) moveToTrash(ids);
   };
   document.getElementById("btn-swap-all").onclick = () => swapVersion(store.tracks.filter((t) => t.clean_flag), "explicit");
   const more = document.getElementById("btn-view-menu");

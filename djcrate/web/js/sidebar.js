@@ -5,7 +5,7 @@ import { emit, findCrate, store } from "./store.js";
 import { confirmDialog, errorToast, h, menu, promptDialog, toast } from "./ui.js";
 
 const SMART_ICONS = {
-  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!", clean_versions: "🔇",
+  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!", clean_versions: "🔇", no_crate: "○",
   hidden: "◌", trash: "🗑",
 };
 
@@ -25,7 +25,7 @@ export function renderSidebar() {
   },
     h("span", { class: "icon" }, SMART_ICONS[s.key] || "•"),
     h("span", { class: "name" }, s.name),
-    h("span", { class: "count" }, ["check_version", "missing", "clean_versions", "hidden", "trash"].includes(s.key) && !s.count ? "" : s.count),
+    h("span", { class: "count" }, ["check_version", "missing", "clean_versions", "no_crate", "hidden", "trash"].includes(s.key) && !s.count ? "" : s.count),
   );
   document.getElementById("smart-list").replaceChildren(...data.smart.map(item));
   document.getElementById("tree").replaceChildren(...data.tree.map(renderNode));

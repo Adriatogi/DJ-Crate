@@ -97,6 +97,7 @@ function renderEmpty() {
       "smart:check_version": "No length mismatches — every download matches its Spotify length.",
       "smart:missing": "No missing files.",
       "smart:clean_versions": "No clean versions found. Songs whose YouTube link is the clean copy of an explicit song show up here.",
+      "smart:no_crate": "Every song is in a crate. Songs that aren't in any crate (e.g. from a crate deleted before the Trash existed) show up here.",
       "smart:hidden": "No hidden songs. Tick songs and choose Hide to keep them out of every list without deleting them.",
       "smart:trash": "The Trash is empty. Songs you delete, songs from deleted crates and songs removed from a Spotify playlist land here.",
     };
@@ -433,7 +434,7 @@ function afterChange(ids) {
   emit("refresh-sidebar");
 }
 
-async function moveToTrash(ids) {
+export async function moveToTrash(ids) {
   try {
     const r = await post("/api/tracks/trash", { ids });
     afterChange(ids);

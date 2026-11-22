@@ -137,3 +137,14 @@ def test_song_back_on_any_playlist_leaves_the_trash(lib):
     assert conn.execute("SELECT trashed_at FROM tracks WHERE id = ?", (s,)).fetchone()[0]
     conn.execute("UPDATE crate_tracks SET removed_from_source = 0 WHERE crate_id = 1")
     assert trash.after_spotify_return(conn, 1, [s]) == 1
+
+
+def test_not_in_a_crate_lists_loose_songs(client, lib):
+    loose, kept, removed = add(lib, "Loose"), add(lib, "Kept"), add(lib, "Removed on Spotify")
+    crate = client.post("/api/crates", json={"name": "C", "kind": "crate"}).json()["id"]
+    client.post(f"/api/crates/{crate}/tracks", json={"ids": [kept, removed]})
+    lib.conn().execute("UPDATE crate_tracks SET removed_from_source = 1 WHERE track_id = ?", (removed,))
+    assert ids(client, "smart:no_crate") == {loose, removed}
+    assert counts(client)["no_crate"] == 2
+    client.post("/api/tracks/trash", json={"ids": [loose, removed]})
+    assert not ids(client, "smart:no_crate") and ids(client, "smart:all") == {kept}

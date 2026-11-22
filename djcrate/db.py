@@ -377,6 +377,8 @@ SMART_CRATES: dict[str, tuple[str, str]] = {
     "downloaded": ("Downloaded", "t.download_status = 'done'"),
     "check_version": ("Check Version", CHECK_VERSION_SQL),
     "clean_versions": ("Clean Versions", CLEAN_SQL),
+    # Songs left loose, e.g. their crate was deleted before the Trash existed: review them, then trash or keep.
+    "no_crate": ("Not in a Crate", "NOT EXISTS (SELECT 1 FROM crate_tracks ct WHERE ct.track_id = t.id AND ct.removed_from_source = 0)"),
     "missing": ("Missing Files", "t.download_status = 'missing'"),
 }
 
