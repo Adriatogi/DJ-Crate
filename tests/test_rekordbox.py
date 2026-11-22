@@ -327,3 +327,36 @@ def test_export_never_sends_comments_or_mytags(lib, tmp_path):
     for el in root.iter("TRACK"):
         assert "Comments" not in el.attrib
     assert b"Hype" not in data
+
+
+def test_migration_from_source_clears_wrong_removed_flags_on_hand_added_songs(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:9])
+        m.setattr(db, "SCHEMA_VERSION", 9)
+        db.migrate(conn)
+    conn.execute("INSERT INTO crates (id, name, kind, spotify_playlist_id) VALUES (1, 'Mix #1', 'spotify', 'p')")
+    conn.execute("INSERT INTO tracks (id, title, spotify_id) VALUES (1, 'gone from Spotify', 'sp1'), (2, 'from YouTube', NULL)")
+    conn.execute("INSERT INTO crate_tracks (crate_id, track_id, removed_from_source) VALUES (1, 1, 1), (1, 2, 1)")
+    db.migrate(conn)
+    rows = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT track_id, removed_from_source, from_source FROM crate_tracks")}
+    assert rows == {1: (1, 1), 2: (0, 0)}
+    # The hand-added song had been sent to the Trash because of the wrong flag: it comes back. The other stays.
+    trashed = {r[0] for r in conn.execute("SELECT id FROM tracks WHERE trashed_at IS NOT NULL")}
+    assert trashed == {1}
+
+
+def test_library_from_mains_v10_upgrades_cleanly(tmp_path, monkeypatch):
+    """main had from_source as its v10; a library at that version still gets every migration here."""
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:9])
+        m.setattr(db, "SCHEMA_VERSION", 9)
+        db.migrate(conn)
+    for stmt in ("ALTER TABLE crate_tracks ADD COLUMN from_source INTEGER NOT NULL DEFAULT 0",
+                 "DELETE FROM schema_version", "INSERT INTO schema_version (version) VALUES (10)"):
+        conn.execute(stmt)
+    db.migrate(conn)
+    assert db.current_version(conn) == db.SCHEMA_VERSION
+    assert {"clean_url", "rekordbox_mytags", "trashed_at", "hidden_at"} <= db._columns(conn, "tracks")
+    assert "from_source" in db._columns(conn, "crate_tracks") and "url" in db._columns(conn, "jobs")

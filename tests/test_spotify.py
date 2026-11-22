@@ -134,6 +134,24 @@ def test_import_and_resync_through_api(client, lib, monkeypatch):
     assert again["already_imported"] and again["added"] == 0
 
 
+def test_resync_leaves_hand_added_songs_alone(client, lib, monkeypatch):
+    conn = lib.conn()
+    db.set_setting(conn, "spotify_client_id", CID)
+    tokens()
+    songs = [{"spotify_id": f"s{i}", "title": f"Song {i}", "artists": "A", "duration_ms": 1000} for i in range(2)]
+    payload = {"playlist_id": "dddddddddddddddddddddd", "name": "Mix", "tracks": songs, "skipped": []}
+    monkeypatch.setattr(spotify, "fetch_playlist", lambda c, ref: payload)
+    crate = client.post("/api/spotify/import", json={"ref": payload["playlist_id"]}).json()["crate_id"]
+    mine = client.post("/api/tracks", json={"title": "From YouTube", "artists": "B", "source_url": "https://youtu.be/abc", "crate_id": crate}).json()["track"]["id"]
+    r = client.post(f"/api/crates/{crate}/resync").json()
+    assert (r["added"], r["removed"]) == (0, 0)
+    flagged = {t["id"]: t["removed_from_source"] for t in client.get(f"/api/tracks?view=crate:{crate}").json()["tracks"]}
+    assert len(flagged) == 3 and flagged[mine] is False
+    # Spotify-sourced songs that leave the playlist are still flagged
+    payload["tracks"] = songs[1:]
+    assert client.post(f"/api/crates/{crate}/resync").json()["removed"] == 1
+
+
 def test_status_shows_disconnected_without_tokens(client, lib):
     conn = lib.conn()
     db.set_setting(conn, "spotify_client_id", "zzz999")

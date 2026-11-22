@@ -116,8 +116,8 @@ def test_migration_trashes_songs_already_removed_on_spotify(tmp_path, monkeypatc
         m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:11])
         m.setattr(db, "SCHEMA_VERSION", 11)
         db.migrate(conn)
-    conn.execute("INSERT INTO crates (id, name, kind, position) VALUES (1, 'Gig', 'spotify', 0), (2, 'Mine', 'crate', 1)")
-    conn.execute("INSERT INTO tracks (id, title) VALUES (1, 'removed only'), (2, 'removed but kept'), (3, 'normal')")
+    conn.execute("INSERT INTO crates (id, name, kind, position, spotify_playlist_id) VALUES (1, 'Gig', 'spotify', 0, 'p'), (2, 'Mine', 'crate', 1, NULL)")
+    conn.execute("INSERT INTO tracks (id, title, spotify_id) VALUES (1, 'removed only', 's1'), (2, 'removed but kept', 's2'), (3, 'normal', 's3')")
     conn.execute("INSERT INTO crate_tracks (crate_id, track_id, position, removed_from_source) VALUES (1,1,0,1), (1,2,1,1), (2,2,0,0), (1,3,2,0)")
     db.migrate(conn)
     trashed = {r[0] for r in conn.execute("SELECT id FROM tracks WHERE trashed_at IS NOT NULL")}

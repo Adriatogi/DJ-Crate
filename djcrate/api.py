@@ -502,8 +502,9 @@ def restore_tracks_to_crate(crate_id: int, body: RestoreRows, conn=Depends(get_c
     with db.tx(conn):
         for r in body.rows:
             conn.execute(
-                "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id, position, removed_from_source, added_at) VALUES (?, ?, ?, ?, ?)",
-                (crate_id, r["track_id"], r.get("position", 0), r.get("removed_from_source", 0), r.get("added_at") or dt.datetime.now().isoformat()),
+                "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id, position, removed_from_source, from_source, added_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (crate_id, r["track_id"], r.get("position", 0), r.get("removed_from_source", 0), r.get("from_source", 0),
+                 r.get("added_at") or dt.datetime.now().isoformat()),
             )
     return {"ok": True}
 
@@ -1045,7 +1046,7 @@ def spotify_import(body: ImportBody, conn=Depends(get_conn)):
             tid, created = db.upsert_track(conn, meta)
             ids.append(tid)
             new += created
-        db.add_to_crate(conn, crate_id, ids)
+        db.add_to_crate(conn, crate_id, ids, from_source=True)
         conn.execute("UPDATE crates SET last_synced = datetime('now') WHERE id = ?", (crate_id,))
     return {"crate_id": crate_id, "name": data["name"], "imported": len(set(ids)), "new_tracks": new,
             "already_known": len(set(ids)) - new, "skipped": data["skipped"]}
@@ -1064,10 +1065,12 @@ def resync(crate_id: int, conn=Depends(get_conn)):
         raise
     with db.tx(conn):
         fetched = [db.upsert_track(conn, meta)[0] for meta in data["tracks"]]
-        current = {r["track_id"]: bool(r["removed_from_source"]) for r in conn.execute(
-            "SELECT track_id, removed_from_source FROM crate_tracks WHERE crate_id = ?", (crate_id,))}
+        current = {r["track_id"]: (bool(r["removed_from_source"]), bool(r["from_source"])) for r in conn.execute(
+            "SELECT track_id, removed_from_source, from_source FROM crate_tracks WHERE crate_id = ?", (crate_id,))}
         plan = spotify.plan_resync(current, fetched)
-        db.add_to_crate(conn, crate_id, plan["add"])
+        db.add_to_crate(conn, crate_id, plan["add"], from_source=True)
+        for tid in plan["claim"]:
+            conn.execute("UPDATE crate_tracks SET from_source = 1 WHERE crate_id = ? AND track_id = ?", (crate_id, tid))
         for tid in plan["removed"]:
             conn.execute("UPDATE crate_tracks SET removed_from_source = 1 WHERE crate_id = ? AND track_id = ?", (crate_id, tid))
         for tid in plan["restored"]:

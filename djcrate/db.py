@@ -374,6 +374,39 @@ def _repair_stale_swaps(conn) -> None:
 
 MIGRATIONS.append(_repair_stale_swaps)  # v15
 
+
+def _from_source(conn) -> None:
+    """v16 (main's v10, merged in): remember which songs in a Spotify crate came from the playlist, so
+    re-sync doesn't flag songs you added by hand as "Removed on Spotify". Older rows can't be told apart
+    exactly: songs with a Spotify ID count as from the playlist, and the wrong flag is cleared from the rest.
+    Songs that went to the Trash only because of such a wrong flag come back out of it."""
+    if "from_source" in _columns(conn, "crate_tracks"):
+        return   # already done: this library came from a version that had it as v10
+    conn.execute("ALTER TABLE crate_tracks ADD COLUMN from_source INTEGER NOT NULL DEFAULT 0")
+    conn.execute("""UPDATE crate_tracks SET from_source = 1
+                    WHERE crate_id IN (SELECT id FROM crates WHERE spotify_playlist_id IS NOT NULL)
+                      AND track_id IN (SELECT id FROM tracks WHERE spotify_id IS NOT NULL AND spotify_id != '')""")
+    conn.execute("UPDATE crate_tracks SET removed_from_source = 0 WHERE from_source = 0")
+    conn.execute("""UPDATE tracks SET trashed_at = NULL, trash_reason = NULL
+                    WHERE trashed_at IS NOT NULL AND json_extract(trash_reason, '$.kind') = 'spotify'
+                      AND EXISTS (SELECT 1 FROM crate_tracks ct WHERE ct.track_id = tracks.id
+                                  AND ct.crate_id = json_extract(tracks.trash_reason, '$.crate_id') AND ct.removed_from_source = 0)""")
+
+
+MIGRATIONS.append(_from_source)  # v16
+
+
+def _columns(conn, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _effective_version(conn, version: int) -> int:
+    """Two lines of history both had a v10: this branch's (clean-version check) and main's (from_source,
+    now v16). A library at main's v10 has from_source but none of v10-v15 here, so it continues from v9."""
+    if version == 10 and "from_source" in _columns(conn, "crate_tracks") and "clean_url" not in _columns(conn, "tracks"):
+        return 9
+    return version
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 # The song's current link is the clean copy of a song YouTube Music also has as explicit.
@@ -445,7 +478,7 @@ def migrate(conn: sqlite3.Connection, backup_fn=None) -> None:
     `backup_fn(version)` is called before migrating an existing database, so a
     failed migration never leaves you without a copy.
     """
-    version = current_version(conn)
+    version = _effective_version(conn, current_version(conn))
     if version > SCHEMA_VERSION:
         raise RuntimeError(
             f"This library was created by a newer DJ Crate (schema v{version}, this app knows v{SCHEMA_VERSION}). Update the app."
@@ -599,14 +632,15 @@ def get_track(conn, track_id: int):
     return track_to_dict(row)
 
 
-def add_to_crate(conn, crate_id: int, track_ids) -> int:
+def add_to_crate(conn, crate_id: int, track_ids, from_source: bool = False) -> int:
+    """from_source: the songs come from the crate's Spotify playlist (import / re-sync)."""
     row = conn.execute("SELECT coalesce(max(position), -1) FROM crate_tracks WHERE crate_id = ?", (crate_id,)).fetchone()
     pos = row[0] + 1
     added = 0
     for tid in track_ids:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id, position) VALUES (?, ?, ?)",
-            (crate_id, tid, pos),
+            "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id, position, from_source) VALUES (?, ?, ?, ?)",
+            (crate_id, tid, pos, int(from_source)),
         )
         if cur.rowcount:
             pos += 1
