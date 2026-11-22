@@ -638,7 +638,8 @@ function togglePlayer(t, tr) {
   playBtn?.classList.add("active");
   if (playBtn) playBtn.textContent = "■";
   player = { trackId: t.id, row, playBtn, trackRow: tr };
-  a.src = `/api/tracks/${t.id}/audio`;
+  // The file can be replaced at the same path (re-download, version swap): a new URL per version skips any cached copy.
+  a.src = `/api/tracks/${t.id}/audio?v=${encodeURIComponent(t.updated_at || "")}-${t.file_duration_ms || ""}`;
   a.play().catch(() => {});
 }
 

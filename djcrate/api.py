@@ -832,7 +832,8 @@ def track_audio(track_id: int, conn=Depends(get_conn)):
     p = state.abs_path(row["file_rel_path"]) if row else None
     if not p or not p.is_file():
         raise AppError("missing_file", "The audio file is missing — Relocate it.", 404)
-    return FileResponse(p, media_type="audio/mpeg")
+    # Re-downloads (e.g. a version swap) replace the file at the same path, so never let the player reuse a cached copy.
+    return FileResponse(p, media_type="audio/mpeg", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/tracks/{track_id}/yt_search")
