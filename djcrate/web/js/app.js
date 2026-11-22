@@ -11,7 +11,7 @@ import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
 import { closePlayer, playerOpen, resetTable, togglePlayPause } from "./tracks.js";
-import { copyText, errorToast, fill, h, toast } from "./ui.js";
+import { copyText, errorToast, fill, h, toast, toolOutput } from "./ui.js";
 
 let tab = "crates";
 let failures = 0;
@@ -432,6 +432,7 @@ function showCrash() {
 
 // ------------------------------------------------ activity panel
 
+
 async function renderActivity() {
   const panel = document.getElementById("activity-panel");
   let d;
@@ -441,6 +442,7 @@ async function renderActivity() {
     h("div", { class: `jm ${j.status === "failed" ? "err" : ""}` },
       j.status === "running" ? `${j.stage || "downloading"} ${j.stage === "downloading" ? Math.round(j.progress * 100) + "%" : ""}` :
         j.status === "queued" ? (j.error_msg || "Queued") : j.error_msg || j.status),
+    j.status === "failed" && j.error_detail ? toolOutput(j.error_detail) : null,
     extra.length ? h("div", { class: "ja" }, extra) : null);
   const btn = (label, fn, kind = "small") => h("button", { class: `btn ${kind}`, onclick: async () => { try { await fn(); } catch (e) { errorToast(e); } renderActivity(); poll(); } }, label);
   const sections = [];
@@ -460,7 +462,10 @@ async function renderActivity() {
       h("div", { class: "actions" }, btn("Retry all failed", () => post("/api/jobs/retry", {}), "small primary")),
       d.failed.map((j) => jobView(j, [
         btn("Retry", () => post("/api/jobs/retry", { ids: [j.id] })),
-        btn("Copy error details", async () => { await copyText(`${j.title} — ${j.artists}\n${j.error_code}: ${j.error_msg}`); toast("Copied."); }),
+        btn("Copy error details", async () => {
+          await copyText(`${j.title} — ${j.artists}\n${j.error_code}: ${j.error_msg}${j.error_detail ? `\n\nyt-dlp said:\n${j.error_detail}` : ""}`);
+          toast("Copied.");
+        }),
         btn("Dismiss", () => post(`/api/jobs/${j.id}/dismiss`)),
       ])));
   }

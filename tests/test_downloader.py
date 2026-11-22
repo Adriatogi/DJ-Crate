@@ -205,3 +205,20 @@ def test_no_formats_with_cookies_tries_once_without(dm, lib, make_mp3, monkeypat
     dm.enqueue(conn, [tid])
     run_one(dm)
     assert tried == ["chrome", ""] and db.get_track(conn, tid)["download_status"] == "done"
+
+
+def test_failed_download_keeps_what_ytdlp_said(dm, lib, monkeypatch):
+    conn, tid = add_track(lib)
+    out = "WARNING: [youtube] No supported JavaScript runtime could be found\nERROR: [youtube] abc: Requested format is not available"
+
+    def fetch(job_id, url, tmp, cookies):
+        raise _Failure("no_formats", "Requested format is not available", "No audio.", out)
+
+    monkeypatch.setattr(dm, "_fetch", fetch)
+    dm.enqueue(conn, [tid])
+    job = run_one(dm)
+    row = conn.execute("SELECT error_detail FROM jobs WHERE id = ?", (job["id"],)).fetchone()
+    assert row["error_detail"] == out
+    assert downloader._tool_output(["[download] 10%", "WARNING: w", "ERROR: e"]) == "WARNING: w\nERROR: e"
+    dm.retry(conn, [job["id"]])
+    assert conn.execute("SELECT error_detail FROM jobs WHERE id = ?", (job["id"],)).fetchone()[0] is None

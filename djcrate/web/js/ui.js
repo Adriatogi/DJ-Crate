@@ -229,3 +229,8 @@ export async function copyText(text) {
     ta.remove();
   }
 }
+
+// What yt-dlp (or ffmpeg) actually printed for a failed download: folded away, one click to read.
+export function toolOutput(text) {
+  return h("details", { class: "tool-output" }, h("summary", {}, "yt-dlp said"), h("pre", {}, text));
+}

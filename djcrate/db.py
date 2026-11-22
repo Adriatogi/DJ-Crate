@@ -395,6 +395,10 @@ def _from_source(conn) -> None:
 
 MIGRATIONS.append(_from_source)  # v16
 
+MIGRATIONS.append(  # v17: keep what yt-dlp (or ffmpeg) actually said when a download fails, to show it
+    "ALTER TABLE jobs ADD COLUMN error_detail TEXT"
+)
+
 
 def _columns(conn, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}

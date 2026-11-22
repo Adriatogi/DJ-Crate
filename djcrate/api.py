@@ -513,7 +513,7 @@ def restore_tracks_to_crate(crate_id: int, body: RestoreRows, conn=Depends(get_c
 
 JOB_JOIN = """
 LEFT JOIN (SELECT track_id, id job_id, status job_status, progress job_progress, stage job_stage, error_msg job_error,
-                  url job_url
+                  url job_url, error_detail job_detail
            FROM jobs WHERE id IN (SELECT max(id) FROM jobs WHERE status IN ('queued','running','interrupted','failed') GROUP BY track_id)
           ) j ON j.track_id = t.id
 """

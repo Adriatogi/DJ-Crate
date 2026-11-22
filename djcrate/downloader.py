@@ -117,6 +117,12 @@ def valid_link(url: str) -> bool:
     return bool(ALLOWED_HOSTS.match((url or "").strip()))
 
 
+def _tool_output(lines: list[str], keep: int = 20) -> str:
+    """What yt-dlp said that matters: its ERROR and WARNING lines (or the last lines if there are none)."""
+    picked = [l for l in lines if "ERROR" in l or "WARNING" in l] or lines[-keep:]
+    return "\n".join(l.rstrip() for l in picked[-keep:])[-4000:]
+
+
 def _error_detail(lines: list[str]) -> str:
     errs = [l.strip() for l in lines if "ERROR" in l]
     return (errs[-1] if errs else (lines[-1].strip() if lines else "")).replace("ERROR: ", "")
@@ -273,7 +279,7 @@ class DownloadManager:
             for r in rows:
                 conn.execute(
                     "UPDATE jobs SET status = 'queued', attempts = 0, next_attempt_at = 0, error_code = NULL, error_msg = NULL, "
-                    "progress = 0, stage = '', updated_at = datetime('now') WHERE id = ?", (r["id"],))
+                    "error_detail = NULL, progress = 0, stage = '', updated_at = datetime('now') WHERE id = ?", (r["id"],))
                 conn.execute("UPDATE tracks SET download_status = 'queued', error_code = NULL, error_msg = NULL WHERE id = ?", (r["track_id"],))
         self.wake()
         return len(rows)
@@ -415,7 +421,7 @@ class DownloadManager:
             finally:
                 conn.close()
         except _Failure as f:
-            self._fail(job, f.code, f.detail, f.message)
+            self._fail(job, f.code, f.detail, f.message, f.output)
         except OSError as e:
             code = "disk_full" if e.errno == 28 else "unknown"
             log.exception("Job %s failed with OSError", job_id)
@@ -469,10 +475,10 @@ class DownloadManager:
             code = classify_error("\n".join(lines))
             if code in ("disk_full", "ffmpeg_missing"):
                 raise _Requeue(code)
-            raise _Failure(code, detail, _no_formats_message(lines, cookies) if code == "no_formats" else None)
+            raise _Failure(code, detail, _no_formats_message(lines, cookies) if code == "no_formats" else None, _tool_output(lines))
         sources = [p for p in tmp.glob("source.*") if p.suffix not in (".part", ".ytdl")]
         if not sources:
-            raise _Failure("unknown", "yt-dlp finished but no audio file was produced: " + _error_detail(lines))
+            raise _Failure("unknown", "yt-dlp finished but no audio file was produced: " + _error_detail(lines), None, _tool_output(lines))
         return self._convert(job_id, sources[0], tmp / "audio.mp3", ffdir)
 
     def _ffmpeg(self, job_id: int, args: list[str], ffdir: str) -> str:
@@ -488,7 +494,8 @@ class DownloadManager:
             code = classify_error(out)
             if code == "disk_full":
                 raise _Requeue(code)
-            raise _Failure("unknown", "Converting to MP3 failed: " + (out.strip().splitlines() or ["?"])[-1])
+            raise _Failure("unknown", "Converting to MP3 failed: " + (out.strip().splitlines() or ["?"])[-1], None,
+                           "\n".join(out.strip().splitlines()[-20:]))
         return out
 
     def _convert(self, job_id: int, src: Path, dest: Path, ffdir: str) -> Path:
@@ -551,7 +558,7 @@ class DownloadManager:
             log.warning("Cover art fetch failed (%s); saving without artwork", e)
             return None, "image/jpeg"
 
-    def _fail(self, job: dict, code: str, detail: str, message: str | None = None):
+    def _fail(self, job: dict, code: str, detail: str, message: str | None = None, output: str | None = None):
         attempts = job["attempts"] + 1
         retryable = code in ("transient", "forbidden", "rate_limited") and attempts <= len(RETRY_DELAYS)
         if code == "forbidden" and not retryable:
@@ -564,8 +571,8 @@ class DownloadManager:
                     log.info("Job %s: %s, retry %d in %ss", job["id"], code, attempts, delay)
                     conn.execute(
                         "UPDATE jobs SET status = 'queued', attempts = ?, next_attempt_at = ?, error_code = ?, error_msg = ?, "
-                        "stage = '', progress = 0, updated_at = datetime('now') WHERE id = ?",
-                        (attempts, time.time() + delay, code, f"{friendly(code)} Retrying in {delay}s…", job["id"]),
+                        "error_detail = ?, stage = '', progress = 0, updated_at = datetime('now') WHERE id = ?",
+                        (attempts, time.time() + delay, code, f"{friendly(code)} Retrying in {delay}s…", output or detail or None, job["id"]),
                     )
                     conn.execute("UPDATE tracks SET download_status = 'queued' WHERE id = ?", (job["track_id"],))
                 else:
@@ -573,9 +580,9 @@ class DownloadManager:
                     if job.get("on_done"):
                         msg = f"Swap not done: the file and its link are unchanged. {msg}"
                     conn.execute(
-                        "UPDATE jobs SET status = 'failed', attempts = ?, error_code = ?, error_msg = ?, stage = '', "
+                        "UPDATE jobs SET status = 'failed', attempts = ?, error_code = ?, error_msg = ?, error_detail = ?, stage = '', "
                         "updated_at = datetime('now') WHERE id = ?",
-                        (attempts, code, msg, job["id"]),
+                        (attempts, code, msg, output or detail or None, job["id"]),
                     )
                     t = conn.execute("SELECT file_rel_path FROM tracks WHERE id = ?", (job["track_id"],)).fetchone()
                     has_file = bool(t and t["file_rel_path"] and self.state.abs_path(t["file_rel_path"]).is_file())
@@ -590,8 +597,9 @@ class DownloadManager:
 
 
 class _Failure(Exception):
-    def __init__(self, code: str, detail: str, message: str | None = None):
+    def __init__(self, code: str, detail: str, message: str | None = None, output: str | None = None):
         super().__init__(detail)
         self.code = code
         self.detail = detail
         self.message = message   # a specific explanation, instead of the code's usual one
+        self.output = output     # what yt-dlp / ffmpeg printed (ERROR and WARNING lines), shown in Activity

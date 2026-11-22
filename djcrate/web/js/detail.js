@@ -6,7 +6,7 @@ import { patch, post } from "./api.js";
 import { cleanSection } from "./cleanver.js";
 import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
-import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast } from "./ui.js";
+import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast, toolOutput } from "./ui.js";
 import { mytagChips, relocateTrack, trashWhy, updateTrack } from "./tracks.js";
 
 function current() {
@@ -96,6 +96,7 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
       t.source_url ? [h("div", { class: "k" }, "Link"), h("div", { class: "v" },
         h("a", { href: "#", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.source_url }); } }, t.source_url))] : null),
     t.error_msg && t.download_status === "error" ? h("div", { class: "banner bad", style: { borderRadius: "6px", margin: "6px 0" } }, t.error_msg) : null,
+    t.job_status === "failed" && t.job_detail ? toolOutput(t.job_detail) : null,
     t.tag_error ? h("div", { class: "banner warn", style: { borderRadius: "6px", margin: "6px 0" } }, t.tag_error) : null,
     h("div", { class: "row gap", style: { flexWrap: "wrap", marginTop: "8px" } },
       t.file_rel_path && t.download_status !== "missing"
