@@ -7,6 +7,13 @@ import { h } from "./ui.js";
 const root = () => document.getElementById("view-docs");
 let loaded = false;
 
+// Open the Docs tab at one section (e.g. "faq-xml"), from a link elsewhere in the app.
+export async function openDocsAt(id) {
+  emit("show-tab", "docs");
+  await showDocs();
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 export async function showDocs() {
   if (loaded) return;
   let html;

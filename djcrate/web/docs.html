@@ -94,6 +94,37 @@
   <li>Send crates and sets to Rekordbox, import the playlists there and perform.</li>
 </ol>
 
+<h2 id="faq">FAQ</h2>
+
+<h3 id="faq-xml">How do I update the Rekordbox XML?</h3>
+<p>DJ Crate reads BPM, key, genre and My Tags from an XML file that <b>Rekordbox</b> writes. Rekordbox never updates that file by itself, so export again whenever you change something there.</p>
+<ol>
+  <li>In DJ Crate, open <a href="#" data-tab="settings">Settings → Rekordbox</a> and note the file path shown. The first time, export first (step 2) and then click <b>Choose XML file…</b>.</li>
+  <li>In Rekordbox, choose <b>File → Export Collection in xml format</b> from the menu bar.</li>
+  <li>Save it over that same file (same folder, same name) and click <b>Replace</b>.</li>
+  <li>DJ Crate picks it up within about 10 seconds, or click <b>Import now</b>. The Settings line should say “updated just now”.</li>
+</ol>
+<p>If saving over the old file is awkward, save it anywhere and use <b>Choose a different file…</b> in Settings.</p>
+
+<h3 id="faq-mytags">How do I see my My Tags in DJ Crate?</h3>
+<ol>
+  <li>In Rekordbox's Preferences, turn on the setting that <b>adds My Tags to Comments</b>. Each song's Comments then start with its tags, like <code>/* Hype / Vocal */</code>.</li>
+  <li>Export the XML again (above).</li>
+</ol>
+<p>A <b>My Tags</b> column appears in the song list, the <b>My Tags ▾</b> button filters by a tag, and each song's card lists them. They're <b>read-only</b>: DJ Crate never writes My Tags or Comments, because writing to Rekordbox's data can corrupt it. To change a tag, change it in Rekordbox and export again.</p>
+
+<h3 id="faq-match">Why do fewer songs match than I have in Rekordbox?</h3>
+<p>Songs are matched by file path. Only songs whose MP3 is in your DJ Crate library folder match, so songs Rekordbox has from other folders or drives don't count. If the number looks far too low, the XML is probably old: export it again.</p>
+
+<h3 id="faq-playlists">How do my crates and sets get into Rekordbox?</h3>
+<p>Turn on <b>Send my crates &amp; sets to Rekordbox</b> in <a href="#" data-tab="settings">Settings → Rekordbox</a>. DJ Crate then keeps <code>DJ Crate for Rekordbox.xml</code> in your library folder up to date by itself. One-time setup in Rekordbox:</p>
+<ol>
+  <li>Preferences → Advanced → Database → rekordbox xml → Imported Library: choose that file.</li>
+  <li>Preferences → View → Layout: tick “rekordbox xml” so it shows in the sidebar.</li>
+  <li>In that section, right-click a playlist → <b>Import Playlist</b>. Do it again after changing a crate.</li>
+</ol>
+<p>Crates become playlists and sets become playlists in main-path order. Only playlists are sent: never BPM, key, grids, cues, notes or tags, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so there are no duplicates.</p>
+
 <h2 id="backups">Backups and a new Mac</h2>
 <p>You need two separate backups: the <b>library folder</b> (every MP3 plus DJ Crate's data in <code>.djcrate/</code>), and <b>Rekordbox's own backup</b> (cues, grids, playlists, My Tags: File → Library → Backup Library). DJ Crate also saves its database every day, keeping the last 14, and <a href="#" data-tab="settings">Settings</a> can export and import your crates.</p>
 <p>To move to a new Mac: put the library folder at the same path, restore the Rekordbox backup, install DJ Crate and point it at the folder. Don't open the same library from two Macs at once.</p>

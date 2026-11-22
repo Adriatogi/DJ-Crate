@@ -494,6 +494,7 @@ table.timeline { width: 100%; border-collapse: collapse; margin-top: 14px; table
 .docs { max-width: 760px; line-height: 1.55; }
 .docs h1 { margin: 0 0 4px; font-size: 22px; }
 .docs h2 { margin: 30px 0 8px; font-size: 17px; scroll-margin-top: 8px; }
+.docs h3 { margin: 18px 0 6px; font-size: 14px; scroll-margin-top: 8px; }
 .docs .lead { color: #b9b9c4; font-size: 14px; }
 .docs p, .docs li { color: #cfcfd8; }
 .docs li { margin: 5px 0; }

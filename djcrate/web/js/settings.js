@@ -1,6 +1,7 @@
 // Settings tab: Spotify, library, downloads/tools, backups, logs.
 
 import { del, get, native, patch, post, put } from "./api.js";
+import { openDocsAt } from "./docs.js";
 import { emit, store } from "./store.js";
 import { confirmDialog, copyText, errorToast, h, modal, toast } from "./ui.js";
 
@@ -285,7 +286,7 @@ function rekordboxCard(card, rb) {
         h("button", { class: "btn", onclick: run(() => post("/api/rekordbox/import")) }, "Import now"),
         h("button", { class: "btn", onclick: run(choose) }, "Choose a different file…"),
         h("button", { class: "btn", onclick: run(() => del("/api/rekordbox/xml")) }, "Stop using this file")),
-      h("p", { class: "muted small" }, "Re-export over the same file in Rekordbox and DJ Crate picks up the change within about 10 seconds.")]
+      h("p", { class: "muted small" }, "A new export is picked up within about 10 seconds.")]
     : [h("div", { class: "line" }, h("button", { class: "btn primary", onclick: run(choose) }, "Choose XML file…"))];
 
   const toggle = h("input", { type: "checkbox", class: "sel", checked: !!ex.on });
@@ -293,34 +294,20 @@ function rekordboxCard(card, rb) {
   const outStatus = !ex.on ? null : ex.error ? `⚠ ${ex.error}`
     : `Updated ${ago(ex.at)} · ${ex.playlists} playlists · ${ex.songs} songs${ex.skipped ? ` · ${ex.skipped} not downloaded yet (left out)` : ""}`;
 
+  const faq = (id, text) => h("a", { href: "#", onclick: (e) => { e.preventDefault(); openDocsAt(id); } }, text);
   return card("Rekordbox",
-    h("p", {}, "DJ Crate and Rekordbox talk through files Rekordbox officially reads and writes. DJ Crate never touches Rekordbox's database."),
-    h("h4", {}, "BPM & key from Rekordbox"),
-    h("ol", {},
-      h("li", {}, "In Rekordbox: File → ", h("b", {}, "Export Collection in xml format"), ", e.g. into your library folder."),
-      h("li", {}, "Choose that file here. Re-export whenever you analyse or fix songs.")),
+    h("p", { class: "muted small" }, "Through XML files only. DJ Crate never touches Rekordbox's database. ", faq("faq", "Step by step: Docs → FAQ")),
+    h("h4", {}, "From Rekordbox: BPM, key, genre & My Tags"),
+    h("p", {}, "In Rekordbox: File → ", h("b", {}, "Export Collection in xml format"), ", then choose that file here. Export again over the same file after changes."),
     ...inLine,
-    h("h4", {}, "My Tags from Rekordbox (read-only)"),
-    h("p", {}, "Want your My Tags in DJ Crate? Rekordbox doesn't put them in the XML by itself, so:"),
-    h("ol", {},
-      h("li", {}, "In Rekordbox's Preferences, turn on the setting that ", h("b", {}, "adds My Tags to Comments"), ". Each song's Comments then starts with its tags, like ", h("code", {}, "/* Hype / Vocal */"), "."),
-      h("li", {}, "Export the collection in xml format again (over the same file).")),
-    h("p", {}, rb.mytags ? `● My Tags found on ${rb.mytags} song${rb.mytags === 1 ? "" : "s"}.` : "No My Tags found in the XML yet."),
-    h("p", { class: "muted small" }, "They show as a My Tags column and on each song's card, and the My Tags button filters by one. DJ Crate only reads them: it never writes Comments or My Tags, so edit tags in Rekordbox and export again to update. ",
-      "The setting's exact name is to be confirmed. If songs you tagged before turning it on don't show their tags in Comments, re-apply a tag to one."),
-    h("p", { class: "muted small" }, "The Genre in that file is read too. It shows as a suggestion on songs with no genre yet, and as a ⚠ if it differs from the genre DJ Crate writes. DJ Crate's own genres are never changed by it."),
-    h("h4", {}, "Send crates & sets to Rekordbox"),
+    h("p", {}, rb.mytags ? `● My Tags on ${rb.mytags} song${rb.mytags === 1 ? "" : "s"} (read-only).`
+      : ["My Tags: turn on Rekordbox's setting that adds My Tags to Comments, then export again. ", faq("faq-mytags", "How?")]),
+    h("h4", {}, "To Rekordbox: crates & sets"),
     h("label", { class: "row gap", style: { cursor: "pointer" } }, toggle, "Send my crates & sets to Rekordbox"),
-    h("p", { class: "muted small" }, "When this is on, DJ Crate creates ", h("code", {}, "DJ Crate for Rekordbox.xml"),
-      " in your library folder and keeps it up to date by itself, every time you change a crate or set. You don't make, export or edit that file. The steps below happen in Rekordbox."),
+    h("p", { class: "muted small" }, "DJ Crate keeps ", h("code", {}, "DJ Crate for Rekordbox.xml"), " in your library folder up to date by itself. Only playlists are sent, never BPM, key, grids, cues or tags. ",
+      faq("faq-playlists", "One-time setup in Rekordbox")),
     outStatus ? h("p", {}, outStatus) : null,
     ex.on ? h("div", { class: "line" },
       h("button", { class: "btn", onclick: () => post("/api/rekordbox/export/reveal").catch(errorToast) }, "Show in Finder"),
-      h("button", { class: "btn", onclick: async () => { await copyText(ex.path); toast("Path copied."); } }, "Copy path")) : null,
-    h("p", {}, "One-time setup in Rekordbox:"),
-    h("ol", {},
-      h("li", {}, "Rekordbox → Preferences → Advanced → Database → rekordbox xml → Imported Library: choose that file."),
-      h("li", {}, "Preferences → View → Layout: tick “rekordbox xml” so it shows in the sidebar."),
-      h("li", {}, "In that section, right-click a playlist → Import Playlist. Do it again after changing a crate.")),
-    h("p", { class: "muted small" }, "Menu names are from Rekordbox's documentation — to be confirmed once tried. Your crates become playlists, sets become playlists in main-path order. Your notes stay in DJ Crate. BPM, key, beat grids and cues are never sent, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so you won't get duplicates."));
+      h("button", { class: "btn", onclick: async () => { await copyText(ex.path); toast("Path copied."); } }, "Copy path")) : null);
 }
