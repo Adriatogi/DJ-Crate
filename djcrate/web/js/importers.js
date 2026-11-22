@@ -148,7 +148,7 @@ async function renderPicker(body) {
 
 function showImportResult(r) {
   if (r.already_imported) {
-    toast(`Already imported — re-synced “${r.name}”: ${r.added} new, ${r.removed} removed on Spotify.`, { type: "success", timeout: 7000 });
+    toast(`Already imported — re-synced “${r.name}”: ${r.added} new, ${r.removed} removed on Spotify${r.trashed ? ` (${r.trashed} moved to the Trash)` : ""}.`, { type: "success", timeout: 7000 });
     return;
   }
   modal({
@@ -169,7 +169,7 @@ export async function resyncCrate(crateId) {
     const r = await post(`/api/crates/${crateId}/resync`);
     close();
     const parts = [`${r.added} new`];
-    if (r.removed) parts.push(`${r.removed} removed on Spotify (kept here, dimmed)`);
+    if (r.removed) parts.push(`${r.removed} removed on Spotify${r.trashed ? ` (${r.trashed} moved to the Trash)` : ""}`);
     if (r.restored) parts.push(`${r.restored} back on Spotify`);
     toast(`Re-synced “${r.name}”: ${parts.join(", ")}.${r.skipped.length ? ` ${r.skipped.length} skipped.` : ""}`, { type: "success", timeout: 7000 });
     emit("refresh-sidebar");
@@ -196,7 +196,7 @@ export async function resyncAll() {
   const btn = document.getElementById("btn-resync-all");
   btn.disabled = true;
   let close = () => {};
-  const total = { added: 0, removed: 0, restored: 0, done: 0 };
+  const total = { added: 0, removed: 0, restored: 0, trashed: 0, done: 0 };
   const failed = [];
   try {
     for (const [i, c] of crates.entries()) {
@@ -204,7 +204,7 @@ export async function resyncAll() {
       close = toast(`Re-syncing ${i + 1} of ${crates.length}: “${c.name}”…`, { timeout: 0 });
       try {
         const r = await post(`/api/crates/${c.id}/resync`);
-        total.added += r.added; total.removed += r.removed; total.restored += r.restored; total.done++;
+        total.added += r.added; total.removed += r.removed; total.restored += r.restored; total.trashed += r.trashed || 0; total.done++;
       } catch (e) {
         if (["revoked", "not_logged_in"].includes(e.code)) {
           close();
@@ -217,7 +217,7 @@ export async function resyncAll() {
     }
     close();
     const parts = [`${total.added} new`];
-    if (total.removed) parts.push(`${total.removed} removed on Spotify`);
+    if (total.removed) parts.push(`${total.removed} removed on Spotify${total.trashed ? ` (${total.trashed} moved to the Trash)` : ""}`);
     if (total.restored) parts.push(`${total.restored} back on Spotify`);
     let msg = `Re-synced ${total.done} crate${total.done === 1 ? "" : "s"}: ${parts.join(", ")}.`;
     if (failed.length) msg += ` ${failed.length} couldn't re-sync: ${failed.map((n) => `“${n}”`).join(", ")}.`;

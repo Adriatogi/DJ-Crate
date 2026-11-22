@@ -8,7 +8,7 @@ The comment frame is never touched, so Rekordbox's Comments field stays yours
 import logging
 from pathlib import Path
 
-from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TSRC, ID3NoHeaderError
+from mutagen.id3 import APIC, ID3, TALB, TDRC, TIT2, TPE1, TSRC, ID3NoHeaderError
 from mutagen.mp3 import MP3
 
 log = logging.getLogger("djcrate.tags")
@@ -31,11 +31,6 @@ def write_tags(path: Path, track: dict, cover: bytes | None = None, cover_mime: 
         tags.delall("TDRC")
     if track.get("isrc"):
         tags.setall("TSRC", [TSRC(encoding=3, text=track["isrc"])])
-    genre = track.get("genre_tag")  # None = leave the file's genre alone; "" = empty it
-    if genre:
-        tags.setall("TCON", [TCON(encoding=3, text=genre)])
-    elif genre == "":
-        tags.delall("TCON")
     if cover:
         tags.delall("APIC")
         tags.add(APIC(encoding=3, mime=cover_mime, type=3, desc="Cover", data=cover))
@@ -67,7 +62,6 @@ def read_tags(path: Path) -> dict:
         "album": text("TALB"),
         "release_date": text("TDRC")[:10],
         "isrc": text("TSRC") or None,
-        "genre": " / ".join(str(v) for v in tags["TCON"].text if str(v).strip()) if "TCON" in tags else "",
         "file_duration_ms": int(audio.info.length * 1000),
     }
 

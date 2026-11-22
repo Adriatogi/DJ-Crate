@@ -6,13 +6,13 @@ import { autoRelocate, initImporters } from "./importers.js";
 import { closeDetail, initDetail } from "./detail.js";
 import { crateMenu, deleteCrate, initSidebar, renderSidebar } from "./sidebar.js";
 import { emit, findCrate, on, store } from "./store.js";
-import { initTracks, renderTracks, resetTable } from "./tracks.js";
+import { deleteForGood, initTracks, renderTracks, resetTable } from "./tracks.js";
 import { debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
 
 let loadSeq = 0;
 
 const SORTS = {
-  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key", genre: "Genre",
+  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key",
   mytags: "My Tags", added: "Date added", status: "Status",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
@@ -23,7 +23,6 @@ function sortValue(t, key) {
     case "duration": return t.duration_ms ?? t.file_duration_ms ?? 0;
     case "bpm": return t.bpm ?? 0;
     case "musical_key": return keyOrder(t.musical_key);
-    case "genre": return t.genre_tag ? t.genre_tag.toLowerCase() : "\uffff"; // songs without a genre last
     case "mytags": return t.mytags?.length ? t.mytags.join(" / ").toLowerCase() : "\uffff";
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
@@ -90,9 +89,8 @@ export async function refreshTracks() {
   const seq = ++loadSeq;
   const q = document.getElementById("search").value;
   try {
-    const rack = store.view.startsWith("genre:") ? `&sub=${store.rack.sub ? 1 : 0}&artist=${encodeURIComponent(store.rack.artist)}` : "";
     const tag = store.mytag ? `&mytag=${encodeURIComponent(store.mytag)}` : "";
-    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${rack}${tag}`);
+    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${tag}`);
     if (seq !== loadSeq) return; // a newer request won
     r.tracks.forEach((t, i) => { t._order = i; });
     store.tracks = r.tracks;
@@ -109,7 +107,7 @@ export async function refreshTracks() {
 export function selectView(view) {
   if (view !== store.view) {
     store.view = view;
-    if (!view.startsWith("genre:")) localStorage.setItem("djc.view", view); // Genre Rack views aren't remembered here
+    localStorage.setItem("djc.view", view);
     resetTable();
     closeDetail();
     store.tracks = [];
@@ -125,9 +123,8 @@ function viewInfo() {
     const c = findCrate(Number(v.split(":")[1]));
     return { name: c?.name || "…", crate: c };
   }
-  if (v.startsWith("genre:")) return { name: store.rack.name || "Genre", crate: null };
   const key = v.split(":")[1];
-  const s = store.sidebar?.smart.find((x) => x.key === key);
+  const s = [...(store.sidebar?.smart || []), ...(store.sidebar?.bins || [])].find((x) => x.key === key);
   return { name: s?.name || "All Tracks", crate: null };
 }
 
@@ -172,7 +169,11 @@ function renderToolbar() {
   swapAll.hidden = !flagged.length;
   swapAll.textContent = `Swap all to explicit (${flagged.length})`;
   const toDownload = ts.filter((t) => t.source_url && ["none", "error"].includes(t.download_status)).length;
+  const inTrash = store.view === "smart:trash";
+  const empty = document.getElementById("btn-empty-trash");
+  empty.hidden = !inTrash || !ts.length;
   const dl = document.getElementById("btn-download-all");
+  dl.hidden = inTrash || store.view === "smart:hidden";
   dl.textContent = toDownload ? `⬇ Download All (${toDownload})` : "⬇ Download All";
   dl.title = toDownload ? "Download every song here that has a link and isn't downloaded yet" : "Nothing here has a link waiting to download";
 }
@@ -225,6 +226,12 @@ export function initCrates() {
   tagBtn.onclick = () => mytagMenu(tagBtn);
   on("filter-mytag", setMytag);
   renderMytagButton();
+  // Empty Trash works on everything in the Trash, so clear the search first to show them all.
+  document.getElementById("btn-empty-trash").onclick = async () => {
+    const search = document.getElementById("search");
+    if (search.value || store.mytag) { search.value = ""; store.mytag = null; renderMytagButton(); await refreshTracks(); }
+    deleteForGood([], { all: true });
+  };
   document.getElementById("btn-swap-all").onclick = () => swapVersion(store.tracks.filter((t) => t.clean_flag), "explicit");
   const more = document.getElementById("btn-view-menu");
   more.onclick = () => viewMenu(more);

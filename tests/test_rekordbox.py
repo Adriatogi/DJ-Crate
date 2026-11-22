@@ -73,7 +73,7 @@ def test_import_matches_paths_and_leaves_others(lib, tmp_path):
     write_xml(xml, [(lib.library / "Space Song.mp3", "93.50", "Am"), (lib.library / nfd, "128.00", "8B"),
                     (lib.library / "Zero.mp3", "0.00", "Fm"), ("/elsewhere/not-mine.mp3", "120", "Cm")])
     s = rekordbox.import_xml(conn, xml)
-    assert s == {"matched": 3, "total": 4, "in_xml": 4, "genres": 0, "mytags": 0}
+    assert s == {"matched": 3, "total": 4, "in_xml": 4, "mytags": 0}
     assert tuple(row(lib, a)) == (93.5, "8A") and tuple(row(lib, b)) == (128.0, "8B")
     assert tuple(row(lib, c)) == (99, "1A")  # not in the XML
     assert tuple(row(lib, d)) == (None, "4A")  # BPM 0.00 means unknown
@@ -138,9 +138,30 @@ def test_migration_from_v6_keeps_tracks(tmp_path, monkeypatch):
     conn.execute("INSERT INTO tracks (title) VALUES ('keep me')")
     db.migrate(conn)
     assert db.current_version(conn) == db.SCHEMA_VERSION
-    row = conn.execute("SELECT title, bpm, musical_key, rekordbox_genre, file_genre FROM tracks").fetchone()
-    assert tuple(row) == ("keep me", None, None, None, None)
-    assert conn.execute("SELECT count(*) FROM genres").fetchone()[0] == 0
+    row = conn.execute("SELECT title, bpm, musical_key FROM tracks").fetchone()
+    assert tuple(row) == ("keep me", None, None)
+
+
+def test_migration_removes_the_genre_rack(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:  # a library with genres, as v12 left it
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:12])
+        m.setattr(db, "SCHEMA_VERSION", 12)
+        db.migrate(conn)
+    conn.execute("INSERT INTO genres (id, name, norm) VALUES (1, 'House', 'house')")
+    conn.execute("INSERT INTO tracks (id, title, rekordbox_genre) VALUES (1, 'song', 'House')")
+    conn.execute("INSERT INTO track_genres (track_id, genre_id) VALUES (1, 1)")
+    conn.execute("INSERT INTO crates (id, name, kind, position, genre_id) VALUES (1, 'House', 'crate', 0, 1), (2, 'Mine', 'crate', 1, NULL)")
+    conn.execute("INSERT INTO crate_tracks (crate_id, track_id, position) VALUES (1, 1, 0), (2, 1, 0)")
+    db.set_setting(conn, "genre_lookup_on", "0")
+    db.migrate(conn)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert not tables & {"genres", "track_genres", "genre_aliases", "genre_ignored", "genre_suggest", "mb_artist_genres"}
+    assert [r[0] for r in conn.execute("SELECT name FROM crates")] == ["Mine"]       # the genre crate is gone, the song stays
+    assert conn.execute("SELECT title FROM tracks").fetchone()[0] == "song"
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")} | {r[1] for r in conn.execute("PRAGMA table_info(crates)")}
+    assert not cols & {"rekordbox_genre", "file_genre", "genre_id"}
+    assert db.get_setting(conn, "genre_lookup_on") is None
 
 
 # ------------------------------------------------------------ export

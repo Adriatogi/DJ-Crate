@@ -7,7 +7,7 @@
 <h2 id="philosophy">Philosophy</h2>
 <ul class="principles">
   <li><b>The DJ decides.</b> There is no recommendation algorithm, no "next song" suggestions and no auto-mixing, and there won't be. DJ Crate remembers what <i>you</i> found (your mixes, samples, notes and sets) and makes it easy to find again. It gives facts such as BPM, key and what samples what. It never picks for you.</li>
-  <li><b>Suggestions are never applied on their own.</b> Genius samples, YouTube search results and genre suggestions from MusicBrainz or Rekordbox are always clicked, ticked or pasted by you. Your Genre Rack is the only list of genres.</li>
+  <li><b>Suggestions are never applied on their own.</b> Genius samples and YouTube search results are always clicked, ticked or pasted by you.</li>
   <li><b>One source for your library: Spotify.</b> To add a song, add it to a Spotify playlist and import it. Songs don't live only inside DJ Crate.</li>
   <li><b>You choose the audio.</b> You paste the link. The length check helps you catch the wrong version, but it never swaps one in silently.</li>
   <li><b>Local and yours.</b> Everything is in your library folder on your Mac. No account, no cloud. Backups are automatic.</li>
@@ -28,7 +28,7 @@
 <table class="resp">
   <tr><th>DJ Crate is responsible for</th><th>Rekordbox is responsible for</th></tr>
   <tr><td>Spotify crates, finding links, downloading, tags</td><td>Analysis, BPM and beat-grid correcting</td></tr>
-  <tr><td>Cataloguing: crates, flags, notes, genres (your Genre Rack, written into the MP3)</td><td>Cue points, hot cues, loops</td></tr>
+  <tr><td>Cataloguing: crates, notes, hidden and trashed songs</td><td>Cue points, hot cues, loops</td></tr>
   <tr><td>Samples (Genius / WhoSampled)</td><td>My Tags, ratings, colours</td></tr>
   <tr><td>Cutting: how songs mix into each other</td><td>USB export for CDJs</td></tr>
   <tr><td>Set Setter: planning sets</td><td>Actually mixing</td></tr>
@@ -38,7 +38,7 @@
 
 <h2 id="crates">Crates</h2>
 <ul>
-  <li><b>Spotify import and re-sync.</b> A playlist becomes a crate with every song's title, artists, album, cover and length. Songs removed on Spotify are kept, dimmed, with your notes and file. <b>↻ All</b> next to the import button re-syncs every Spotify crate in one go. When importing, tick <b>Hide already imported playlists</b> to see only the new ones.</li>
+  <li><b>Spotify import and re-sync.</b> A playlist becomes a crate with every song's title, artists, album, cover and length. Songs removed on Spotify leave the crate; if they aren't in another crate they go to the <b>Trash</b>, with your notes and file, and come back if they return to the playlist. <b>↻ All</b> next to the import button re-syncs every Spotify crate in one go. When importing, tick <b>Hide already imported playlists</b> to see only the new ones.</li>
   <li><b>Smart crates</b> fill themselves: Needs Link, Ready to Download, Downloaded, Check Version, Clean Versions, Missing Files. You can also make your own crates and folders and drag songs into them.</li>
   <li><b>Links.</b> Paste a YouTube link, or use <b>Find</b>. It highlights the result whose length matches Spotify's and warns about Radio Edit, Live, Sped up and similar. It searches the next few songs ahead so Find opens instantly.</li>
   <li><b>Download progress.</b> While songs download, a bar at the top shows <i>2/3 downloaded</i> and fills up as each song finishes (hover to see which songs are downloading). A failed song shows as <i>· 1 failed</i> in red; click to see why and retry. When the run ends it says how many downloaded or failed. Click it to open Activity.</li>
@@ -47,6 +47,8 @@
   <li><b>BPM &amp; Key columns.</b> Sortable, filled from your Rekordbox export. Key shows both notations, like <code>8A · Am</code>.</li>
   <li><b>The song card</b> (click a cover, title or artist) holds notes, samples, metadata and file info. It is the same card everywhere in the app.</li>
   <li><b>Player.</b> ▶ previews a song under its row. Space plays and pauses.</li>
+  <li><b>Trash.</b> At the bottom of the sidebar. Songs land here when you <b>Move to Trash</b>, when you delete a crate (its songs that aren't in another crate), and when they're removed from a Spotify playlist (same rule). They don't count anywhere else: not in All Tracks, Needs Link, downloads or Rekordbox. Each shows why it's there. <b>Restore</b> brings a song back with its notes, file and crates. <b>Empty Trash</b> (or <b>Delete permanently</b>) asks first, then deletes for good; MP3s go to the macOS Trash.</li>
+  <li><b>Hidden.</b> Also at the bottom of the sidebar. Tick any songs and choose <b>Hide</b> to keep them out of every list and count without deleting anything, e.g. songs whose files are gone for good. <b>Unhide</b> brings them back.</li>
 </ul>
 
 <h2 id="clean">Clean and explicit versions</h2>
@@ -58,22 +60,6 @@
   <li><b>Find</b> notes which results are the clean copy, with a link to use the explicit one instead.</li>
   <li><b>What it can't tell.</b> Only official YouTube Music tracks are marked explicit or not, so user uploads and music videos get no label (their song card offers the official explicit copy if there is one). Listening to the audio alone can't reliably tell a clean edit (a few muted words look like ordinary pauses), and re-recorded radio lines can't be detected at all, so give a new song a listen anyway.</li>
   <li>Turn it off under <b>Settings → Clean versions</b>.</li>
-</ul>
-
-<h2 id="genres">Genre Rack</h2>
-<p>The <b>Genre Rack</b> tab is your own list of genres and sub-genres (e.g. <i>House › Deep House</i>). It is the only place genres come from, so “House”, “house” and “hip-hop / Hip Hop” can never become separate genres.</p>
-<ul>
-  <li><b>Tagging a song.</b> The Genre column (and the song card) opens a dropdown of your rack. Type to search. If it isn't there, <b>+ Add “…” to the Genre Rack</b> adds it on the spot, optionally inside another genre. A song can have several genres.</li>
-  <li><b>In the MP3.</b> Genres are written into the file's Genre tag as <code>House / Deep House / Amapiano</code>, parent first, so Rekordbox shows them. For songs Rekordbox already has, use right-click → Reload Tag (to be confirmed). The comment tag is never touched.</li>
-  <li><b>The rack.</b> Genres are cards. Click one to open it: its sub-genres show as cards, with its <b>artists</b> (from its songs; you never set an artist's genre) in a row and its <b>songs</b> below, in the same table as Crates. Drag a card onto another to nest it, drag songs onto a card to tag them, and use ⋯ for rename, other spellings (aliases), merge and delete.</li>
-  <li><b>Sub-genres.</b> Open a genre and press <b>+ Sub-genre</b> (or hover its name under My genres and click <b>+</b>). To make an <i>existing</i> genre a sub-genre of another, drag its card onto the other card, or use its <b>⋯</b> menu → <b>Move inside another genre…</b>; <b>Move to the top level</b> takes it back out.</li>
-  <li><b>Putting songs in a genre.</b> Open it and press <b>+ Add songs</b>, then click songs to add them (click again to undo; “Show” filters to songs with no genre, all songs, or the songs of any one genre), drag songs from Crates onto its card, or use the <b>[+]</b> square in a song's Genre column. Hover a genre on a song and click ✕ to remove it.</li>
-  <li><b>MusicBrainz genres.</b> The left side lists only the genres MusicBrainz put your songs or their artists under that aren't in your rack yet (like “Pop”), with how many songs. <b>+ Add</b> puts one in your rack, where you decide what it sits under; ✕ hides one you don't want. Searching looks through all ~2,200 names MusicBrainz has.</li>
-  <li><b>Other spellings.</b> Give a genre aliases (“Hip-Hop/Rap” → add “Hip-Hop” and “Rap”) and names from Rekordbox, MP3s or MusicBrainz match it. Case and hyphens never matter.</li>
-  <li><b>Bring in genres…</b> lists every genre name found in your Rekordbox XML and MP3s. Match each to your rack, ignore the ones you don't want, then apply to songs that have no genre yet.</li>
-  <li><b>⚠ next to a genre</b> means Rekordbox currently has a different genre for that song. Hover to see it. DJ Crate wins: Reload Tag in Rekordbox to update it.</li>
-  <li><b>Suggestions.</b> A song with no genre shows faint chips in its Genre cell: the genre from Rekordbox or the MP3, and MusicBrainz suggestions looked up quietly in the background (dashed when it is the artist's genre, not necessarily the song's). Click a chip to use it, or the <b>[+]</b> square for the full dropdown. A <b>?</b> means the name isn't in your rack yet: add it, make it an alias, or ignore it. Nothing is applied until you click.</li>
-  <li><b>Genre crates.</b> <b>Make crate</b> turns a genre into a live crate that fills itself with its songs (and its sub-genres'). It shows in your sidebar with a 🏷 and goes to Rekordbox like your other crates. You can't drag songs in by hand; tag them instead.</li>
 </ul>
 
 <h2 id="cutting">Cutting</h2>
@@ -97,7 +83,7 @@
 <h2 id="faq">FAQ</h2>
 
 <h3 id="faq-xml">How do I update the Rekordbox XML?</h3>
-<p>DJ Crate reads BPM, key, genre and My Tags from an XML file that <b>Rekordbox</b> writes. Rekordbox never updates that file by itself, so export again whenever you change something there.</p>
+<p>DJ Crate reads BPM, key and My Tags from an XML file that <b>Rekordbox</b> writes. Rekordbox never updates that file by itself, so export again whenever you change something there.</p>
 <ol>
   <li>In DJ Crate, open <a href="#" data-tab="settings">Settings → Rekordbox</a> and note the file path shown. The first time, export first (step 2) and then click <b>Choose XML file…</b>.</li>
   <li>In Rekordbox, choose <b>File → Export Collection in xml format</b> from the menu bar.</li>

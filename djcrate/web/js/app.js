@@ -7,7 +7,6 @@ import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
 import { showDocs } from "./docs.js";
-import { initRack, leaveRack, showRack } from "./rack.js";
 import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
@@ -24,8 +23,6 @@ let everConnected = false;
 let openedPath = null;
 let searchPaused = false;
 let lastRekordboxAt;
-let lastLookedUp;
-let lastGenreRefresh = 0;
 let lastCleanFlagAt;
 let shownBatchEnd;   // the finished run we've already shown (by its time); set on the first poll
 let batchEndTimer = null;
@@ -37,13 +34,11 @@ let pendingTrackRefresh = false;
 // ------------------------------------------------ tabs
 
 function showTab(name) {
-  if (tab === "rack" && name !== "rack") leaveRack(); // hands the song table back to Crates
   tab = name;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   if (name === "sets") showSets();
   if (name === "cutting") showCutting();
-  if (name === "rack") showRack();
   if (name === "docs") showDocs();
   if (name === "settings") showSettings();
   if (name !== "crates") closePlayer();
@@ -99,28 +94,18 @@ async function poll() {
     const key = `${q.queued}|${q.running}|${q.failed}|${q.interrupted}`;
     // While downloads run, keep the table + counts live.
     if (q.queued || q.running || key !== lastQueueKey) {
-      if (tab === "crates" || tab === "rack") refreshTracks();
+      if (tab === "crates") refreshTracks();
       if (key !== lastQueueKey) refreshSidebar();
     }
     lastQueueKey = key;
     // Rekordbox re-export picked up by the watcher: refresh BPM & key.
     const rb = s.rekordbox;
     if (rb && lastRekordboxAt !== undefined && rb.at && rb.at !== lastRekordboxAt) {
-      if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
+      if (tab === "crates") refreshTracks(); else pendingTrackRefresh = true;
       if (tab === "settings") showSettings();
       toast(rb.error || `Updated BPM & key for ${rb.matched} songs from Rekordbox`, { type: rb.error ? "warn" : "success" });
     }
     lastRekordboxAt = rb?.at ?? null;
-    // Background genre suggestions arriving: refresh the table now and then (never while you're typing in it).
-    const gl = s.genres;
-    if (gl) {
-      if (lastLookedUp === undefined) lastLookedUp = gl.looked_up;
-      else if (gl.looked_up !== lastLookedUp && Date.now() - lastGenreRefresh > 30000) {
-        lastLookedUp = gl.looked_up;
-        lastGenreRefresh = Date.now();
-        if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
-      }
-    }
     // The background clean check found a clean version: say so once, with the choice right there.
     // While it works through your existing songs, finds are summed up (at most one notice a minute).
     const cf = s.clean?.last_flag;
@@ -130,7 +115,7 @@ async function poll() {
       lastCleanNotice = Date.now();
       const found = Math.max(1, (s.clean.flagged ?? 0) - cleanSeen);
       cleanSeen = s.clean.flagged ?? 0;
-      if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
+      if (tab === "crates") refreshTracks(); else pendingTrackRefresh = true;
       emit("refresh-sidebar");
       announceClean(cf, found);
     }
@@ -538,7 +523,6 @@ function init() {
   window.addEventListener("error", (e) => console.error(e.error || e.message));
   window.addEventListener("unhandledrejection", (e) => { console.error(e.reason); });
   initCrates();
-  initRack();
   poll();
   setInterval(poll, 2000);
 }

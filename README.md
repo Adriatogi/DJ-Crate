@@ -2,23 +2,18 @@
 
 **Spotify playlists → crates → the right audio, every time.**
 
-Tools like spotdl download your Spotify playlists by guessing the YouTube video. They often get the wrong one: the radio edit, a live version, a music-video intro. DJ Crate does the guessing differently: **you** pick the link.
+Tools like spotdl guess the YouTube video for each song and often get the wrong one (radio edit, live version, music-video intro). In DJ Crate, **you** pick the link.
 
-1. Import a Spotify playlist. It becomes a **crate** with every song's title, artists, album, cover and length.
-2. Paste a YouTube link for each song, or use **Find ▾**. It shows the top results, highlights the one whose length matches Spotify's, and warns about "Radio Edit", "Live", "Sped up" and other versions.
-3. Hit **Download All**. Each song becomes a tagged `Title - Artist.mp3` in one library folder, which Rekordbox imports.
-4. Write notes on any song (they stay in DJ Crate). The Genre Rack, Cutting and Set Setter keep the rest of your prep in one place.
-5. Plan sets in **Set Setter**: an ordered running list with cue times, transition notes and running time, exportable as text.
+1. **Import a Spotify playlist.** It becomes a crate with every song's title, artists, album, cover and length.
+2. **Pick a link** for each song: paste one, or use **Find ▾**, which highlights the result whose length matches Spotify's and warns about radio edits, live versions and the like.
+3. **Download All.** Each song becomes a tagged `Title - Artist.mp3` (constant 192 kbps) in one library folder that Rekordbox imports.
+4. **Prep:** notes, **Cutting** (how songs mix into each other) and **Set Setter** (plan sets as a board).
 
-6. **BPM & key from Rekordbox.** Export your collection as XML from Rekordbox and DJ Crate shows sortable BPM and Key columns (`8A · Am`), refreshing whenever you re-export. Your **My Tags** come along read-only (a My Tags column, plus a filter) if Rekordbox is set to add My Tags to Comments.
-7. **Send crates & sets to Rekordbox.** Crates, folders and sets become playlists in a separate `DJ Crate for Rekordbox.xml` that DJ Crate writes and keeps up to date by itself; you never make or edit it. Rekordbox matches songs by file path, so there are no duplicates.
+It also flags clean versions, shows BPM, key and My Tags from Rekordbox, and sends your crates and sets to Rekordbox as playlists. Everything stays on your Mac. **Open the Docs tab in the app for how everything works.**
 
-Everything stays on your Mac. DJ Crate runs as a normal app window; no browser tab or terminal is needed. Open the **Docs** tab inside the app for everything it does and why.
-
-**Philosophy:** the DJ decides. There is no recommendation algorithm and no auto-mixing. DJ Crate remembers what you found and shows facts, but you pick what plays next.
+**Philosophy:** the DJ decides. No recommendation algorithm, no auto-mixing.
 
 ---
-8. **Genre Rack.** Your own list of genres and sub-genres (a tab of its own). Songs only get genres from it, so spellings never drift; DJ Crate writes them into each MP3's Genre tag for Rekordbox, shows a ⚠ when Rekordbox has something different, and can turn any genre into a live crate. The tab shows genres as cards you drill into, keeps an Unsorted card for songs with no genre, and lists the MusicBrainz genres your songs might need (searchable across all ~2,200). Suggestions from Rekordbox, your MP3s and MusicBrainz appear as faint chips in a song's Genre cell (with a [+] square for the full dropdown); nothing is applied on its own.
 
 ## Install (macOS)
 
@@ -26,179 +21,72 @@ Everything stays on your Mac. DJ Crate runs as a normal app window; no browser t
 curl -fsSL https://raw.githubusercontent.com/Adriatogi/DJ-Crate/main/scripts/install.sh | bash
 ```
 
-This needs [Homebrew](https://brew.sh). The installer adds whatever is missing (`ffmpeg`, `uv`, and `deno` if you have neither Deno nor Node). It clones the repo to `~/DJ-Crate`, installs the dependencies, and builds **DJ Crate.app** inside that folder. Open it from there or with Spotlight, and drag it to your Dock to keep it handy.
-
-Everything lives in that one folder:
-
-```
-~/DJ-Crate/
-├── DJ Crate.app      ← the app (built by the installer)
-├── Libraries/
-│   ├── My Library/   ← your music + DJ Crate's data
-│   └── Sam/          ← another person's library (optional)
-└── djcrate/ …        ← the code
-```
-
-> Deleting the `DJ-Crate` folder deletes the libraries inside it too. Back it up (see below) before you remove or reinstall it.
+Needs [Homebrew](https://brew.sh). The installer adds `ffmpeg`, `uv` and `deno` if missing, clones the repo to `~/DJ-Crate`, and builds **DJ Crate.app** there. Your libraries live in `~/DJ-Crate/Libraries/`, so **back up before deleting that folder**.
 
 <details>
-<summary>Prefer to do it by hand?</summary>
+<summary>By hand</summary>
 
 ```bash
 brew install ffmpeg uv deno       # deno: skip if you already have Node
 git clone https://github.com/Adriatogi/DJ-Crate.git ~/DJ-Crate
-cd ~/DJ-Crate
-uv sync
-scripts/make_app.sh              # builds ~/DJ-Crate/DJ Crate.app
-# or run it directly:  uv run python -m djcrate.main
+cd ~/DJ-Crate && uv sync
+scripts/make_app.sh               # or run directly: uv run python -m djcrate.main
 ```
 </details>
 
-**Update:** `~/DJ-Crate/scripts/update.sh`. It pulls the latest version, reinstalls and rebuilds the app. If anything fails, it rolls back to the version you had. Your music and crates are never touched.
-
----
+**Update:** `~/DJ-Crate/scripts/update.sh`. It rolls back if anything fails, and never touches your music or crates.
 
 ## First launch
 
-1. **Create your library.** Give it a name, and it's created in `Libraries/<name>` inside the DJ-Crate folder. You can also use **Open a folder…** to pick any other folder, like an external SSD. This one folder holds every MP3 *and* DJ Crate's data (`.djcrate/`). It's what Rekordbox imports, and what you copy to move to a new Mac.
-2. **Connect Spotify** (once, about 2 minutes). Everyone uses their own free Spotify developer app, so there's no shared app and no user limit:
-   1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and log in. **Your account needs Spotify Premium.**
-   2. **Create app.** Use any name (e.g. "DJ Crate") and description, and tick **Web API**.
-   3. **Redirect URI:** `http://127.0.0.1:8765/callback`. Enter it exactly like that; Settings has a copy button.
-   4. Open the app's settings, copy the **Client ID**, and paste it into **DJ Crate → Settings → Spotify**. Then click **Save** and **Log in to Spotify**.
+1. **Create a library** (or **Open a folder…**, e.g. on an external SSD). This one folder holds every MP3 and DJ Crate's data. It's what Rekordbox imports and what you copy to a new Mac.
+2. **Connect Spotify** (once, ~2 minutes, needs **Spotify Premium**):
+   1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → **Create app**, any name, tick **Web API**.
+   2. Redirect URI: `http://127.0.0.1:8765/callback` (exactly; Settings has a copy button).
+   3. Paste the app's **Client ID** into **Settings → Spotify**, then **Log in to Spotify**.
 
-   Your login is stored in the macOS Keychain, never in the library folder.
+> Spotify only lets apps read playlists **you own or collaborate on**, plus Liked Songs. For anyone else's, copy its songs into a new playlist of your own and import that.
 
-> **Spotify limitation:** since 2026, Spotify only lets apps read the songs in playlists **you own or collaborate on**, and Liked Songs. For anyone else's playlist (including Spotify's own), select all its songs in Spotify, choose **Add to playlist → New playlist**, and import that.
-
-### More than one person on the same Mac
-Every library is fully separate: its own music, crates, notes, sets **and Spotify login**. When DJ Crate opens, it asks **which library** to use. Tick **"Don't ask again"** to always open the last one. Switch any time by clicking the library name in the top bar, or with **Settings → Switch library…**. Removing a library from the list never deletes its folder.
-
-Each person logs in to their own Spotify account. They can create their own developer app (steps above) or share yours. If they share yours, add their Spotify email under **User Management** in your Spotify dashboard, because unapproved apps only allow listed users.
-
----
-
-## Using it
-
-### Crates
-- **All Tracks** holds every song you have. **Smart crates** fill themselves: Needs Link, Ready to Download, Downloaded, Ready, Broken, ⚠ Check Version, Missing Files.
-- **Your crates and folders:** create them with **+♪** and **+📁**. Drag crates into folders, and drag songs onto crates. Every crate shows its progress (`12/30 ↓`).
-- **One song, one record.** If a song is in five crates, it's still one song. Its link, file, checkmarks and notes are shared everywhere.
-- **Re-sync** a Spotify crate to pick up new songs. Songs removed on Spotify are **kept**, dimmed with a "Removed on Spotify" badge, so you never lose a file or your notes.
-- **Select songs** with the checkboxes, or the header box to select all. Then **Add to crate**, **Genre**, **Download**, **Remove from crate** (only takes it out of that crate), or **Delete from library** (asks first; the MP3 goes to the Trash).
-- **Sort** by clicking a column header (first click ascending, second descending, third back to default), or use **Sort ▾**, which also has Date added.
-- **Add track** handles songs that aren't on Spotify, such as bootlegs and edits; SoundCloud and Bandcamp links work too. **Import folder** adds MP3s you already have.
-
-### Links and downloads
-- Paste a link into the row, or use **Find ▾**. Green means the result's length matches Spotify's, and ⚠ marks a different version.
-- **Find remembers results** for a week ("Saved results · Search again"). When you open Find, DJ Crate also quietly searches the **next 3 songs** that need a link, so theirs open instantly. Change this under **Settings → Downloads → Search ahead**, from 0 (off) to 10 max. If YouTube rate-limits the searches, it tells you and pauses for 3 minutes.
-- Files are saved as **`Title - Artist.mp3`**, with all artists, features included. They're tagged with title, artists, album, year, ISRC and cover art. The comment tag is never touched, so Rekordbox's Comments stay yours.
-- **Format: MP3, constant 192 kbps.** YouTube's audio is about 130 kbps, so higher bitrates don't add quality. Constant bitrate on purpose: variable-bitrate MP3s can make cue points drift between Rekordbox and CDJs.
-- **⚠ Check Version:** if a download is more than 5 seconds off Spotify's length, you probably got a different version. It's only a hint, so ignore it for a song you cut on purpose.
-- **Clean versions:** YouTube Music lists many albums twice, once marked explicit and once not, and YouTube often hands you the clean one without saying so. DJ Crate checks each YouTube link in the background. A grey **Clean** label next to a title means the link is the clean copy and an explicit copy of the same song exists. It's information, not a warning, since some gigs want clean. Click it to **swap to explicit**; explicit songs with a clean copy offer **swap to clean** in their song card. Swapping changes the link and re-downloads to the same file, so Rekordbox keeps its link. The **Clean Versions** smart crate lists every clean song, with **Swap all to explicit**, and **Find** notes clean results. Only official YouTube Music tracks can be checked, and re-recorded radio lines can't be detected, so still give new songs a listen. Turn it off under **Settings → Clean versions**.
-- **▶** previews a downloaded song in a player under its row. Drag the slider to skip around; **Space** plays and pauses, **Esc** closes.
-- **Progress bar:** while songs download, the top bar shows `2/3 downloaded` and fills up as each song finishes (hover to see which songs are downloading). If a song fails it says `· 1 failed` in red; click it to see why and retry. When it's done it says `Downloaded 12 ✓` (or how many failed) for a few seconds. Click it for details.
-- **The bell (Activity)** shows downloads in progress and failures, with the reason and a Retry button.
-
-### Cutting: how your songs mix into each other
-Every song has its own **board**, a node editor with the song in the middle:
-- **A mix is a note between songs:** *Shangri-La → [loop the last 8 bars, reverb, slow it down, bring in the Elevators instrumental first] → Elevators*.
-  - Mixes are one-way. Elevators → Shangri-La would be its own mix.
-  - Several songs can wire into one note (e.g. layering an acapella), and a note can lead to several songs.
-- **To make one,** drag from a song's **●** onto another song, or onto empty space to pick one, then write the note. You can also use **+ Connect a song…**.
-- **Steps 1 · 2 · 3** shows the songs your song connects to as faded "ghost" nodes, then their connections, and so on. Double-click a ghost to open its board.
-- **Samples:** on the right, add what a song samples. It can be text, or a link to another song in your library, which shows as a dotted line, plus a "Sampled by" list.
-- **Find samples (Genius):** looks up what a song samples, interpolates, or was sampled in, and you tick which ones to keep. Songs in your library are linked; the rest are saved as text, and you can link them later (a "Link →" button shows up once the song is in your library). To get a sample into your library, add it to a Spotify playlist and import it. Setup: make a free API client at genius.com/api-clients, click "Generate Access Token", and paste it in Settings → Genius. **WhoSampled ↗** opens WhoSampled's search in your browser (it has no public API).
-- Drag nodes around and DJ Crate remembers the layout. **Tidy up** resets it.
-- To remove something, select a note or wire and press **Delete**.
-
-### Set Setter
-Build a set as a **board**:
-- **Add nodes:** songs with **+ Song** and free-text cards with **+ Text** ("mic break", "B2B with…").
-- **Wire songs together through mix notes.** Branch out as much as you like, e.g. a backup song if the crowd isn't feeling it.
-- **The bright wires are your main path:** the set as you'd play it. Select any wire to **Make main path** or **Add mix note here**.
-- **Select a song** to see the **mixes you've saved from it in Cutting**. Click one to drop it in.
-- **Save as mix** on a note sends that transition to Cutting, so you can reuse it in other sets.
-
-**List** shows the main path as a running order with start times and the total length. **Plays for** sets how long a song actually plays in the set (e.g. you mix in at 1:04 of a 3:03 song, so 1:59). Cue and transition notes can be edited there too. **Export as text** copies the main path to the clipboard or saves a `.txt` file, plus an "Alternatives" section for your branches.
-
----
+**Several people on one Mac:** each library is separate (music, crates, sets and Spotify login). Switch by clicking the library name in the top bar. Someone sharing your Spotify developer app must be added under **User Management** in your Spotify dashboard.
 
 ## With Rekordbox
 
-DJ Crate and Rekordbox stay **separate on purpose**, with one shared music folder as the single source of truth. DJ Crate gets the music and tracks your prep. Rekordbox does analysis (BPM, key, grids, cues), playlists and performance. DJ Crate never touches Rekordbox's database.
+DJ Crate gets the music and tracks your prep; Rekordbox analyses, sets cues and plays. They share one music folder and talk only through XML files. DJ Crate **never touches Rekordbox's database**.
 
-1. Import from Spotify and paste links in DJ Crate.
-2. Download, then check with ▶ and the ⚠ length flag.
-3. In Rekordbox, drag the library folder (or just the new files) into **Collection**. Getting new downloads into Rekordbox is a manual step, so make it part of your routine.
-4. In Rekordbox: analyze, fix grids, set cues, and build playlists. If something's off with a song (bad rip, wrong version, clipping), put what's wrong in its notes in DJ Crate.
-6. If you edit a song's title, artists or genres in DJ Crate *after* importing, right-click it in Rekordbox and choose **Reload Tag**.
+- **New downloads:** drag the library folder (or new files) into Rekordbox's Collection. After editing a song's title or artists in DJ Crate, right-click it in Rekordbox → **Reload Tag**.
+- **BPM, key and My Tags in:** in Rekordbox, File → **Export Collection in xml format**, then pick that file in **Settings → Rekordbox**. Export again over the same file after changes. My Tags are read-only and need Rekordbox's setting that adds My Tags to Comments.
+- **Crates and sets out:** turn on **Settings → Rekordbox → Send crates & sets**. Only playlists are sent, never BPM, key, grids, cues or tags.
+- **Don't rename or move MP3s in Finder.** If a file goes missing, use **Relocate…** or **⋯ → Auto Relocate**.
 
-**BPM and key** come from Rekordbox's own analysis (so your fixes count), through its XML export. In Rekordbox: File → **Export Collection in xml format**. In DJ Crate: **Settings → Rekordbox → Choose XML file…**. Re-export over the same file and DJ Crate updates within ~10 seconds.
+The Docs tab has an FAQ with the step-by-step Rekordbox setup.
 
-**My Tags** are read from the same XML, and only read: DJ Crate never writes Comments or My Tags, since writing to Rekordbox's data can corrupt it. Rekordbox only includes them if you turn on its setting that adds My Tags to Comments (`/* Hype / Vocal */`); DJ Crate reads that block. Change tags in Rekordbox and export again; tags removed there disappear on the next import. The setting's exact name is still to be confirmed.
+## Backups and a new Mac
 
-**Genres** live in DJ Crate's **Genre Rack** tab. They are written into the MP3's Genre tag as `Parent / Sub-genre`, which Rekordbox shows in its Genre column; for songs Rekordbox already has, use right-click → Reload Tag there (to be confirmed). DJ Crate never touches the comment tag, so Rekordbox's Comments (and anything My Tag adds to them) stay yours. The Genre in your Rekordbox XML is read too, as a suggestion or a ⚠ when it differs. MusicBrainz is asked (slowly, in the background; switch it off in Settings → Genres) for suggestions on songs with no genre.
+Keep **two backups**: the **library folder** (MP3s + `.djcrate/`) and **Rekordbox's own backup** (File → Library → Backup Library: cues, grids, playlists, My Tags). DJ Crate also keeps daily database copies (last 14) in `.djcrate/backups/`.
 
-**Crates and sets go the other way** via **Settings → Rekordbox → Send crates & sets**, which keeps `DJ Crate for Rekordbox.xml` up to date in the library folder. In Rekordbox, point *Preferences → Advanced → Database → rekordbox xml* at it, then import playlists from the "rekordbox xml" sidebar section. Only song identity is sent; never notes, BPM, key, grids or cues. (Menu names are to be confirmed against a real Rekordbox.)
-
-**Don't rename or move MP3s in Finder.** DJ Crate never renames a file after downloading it, so Rekordbox keeps its link. Edit names in DJ Crate; that changes the tags, not the filename. If a file does go missing, DJ Crate marks it with a red **!**, the same as Rekordbox. Use **Relocate…** for one file, or **⋯ → Auto Relocate** to search a folder.
-
----
-
-## Backups and moving to a new Mac
-
-You need **two separate backups**. The library folder is the one source of truth that both apps share:
-
-| What | Contains | How |
-|---|---|---|
-| **Library folder** | every MP3 + `.djcrate/` (crates, links, notes, checkmarks, sets) | copy the folder, or keep it on an external SSD |
-| **Rekordbox** | cues, grids, BPM fixes, playlists, My Tags | Rekordbox → File → Library → **Backup Library** (no need to include music if you copied the folder) |
-
-Rekordbox's own backup doesn't include DJ Crate's data, or songs you haven't imported into Rekordbox yet. That's why the library folder is the thing you move.
-
-**On the new Mac:**
-1. Put the library folder at the **same path** (e.g. `~/DJ-Crate/Libraries/My Library`).
-2. Restore the Rekordbox backup. With the same path, it finds every file.
-3. Install DJ Crate and point it at the folder.
-
-If the path is different, use Rekordbox's relocate, and in DJ Crate use **Switch library → Open a folder…**. DJ Crate stores paths relative to the library folder, so it just works.
-
-DJ Crate also saves a copy of its database **every day** (last 14 kept, in `.djcrate/backups/`). **Settings → Export crates** makes a small zip of DJ Crate's data, optionally with the music, and **Import crates** restores one.
-
-> Don't open the same library from two Macs at once (e.g. a shared Dropbox folder). DJ Crate detects it and offers read-only mode, because two writers can corrupt the database.
-
----
+On a new Mac: put the library folder at the **same path**, restore the Rekordbox backup, install DJ Crate and open the folder. Don't open one library from two Macs at once (e.g. a shared Dropbox folder).
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| "YouTube changed something" / lots of failures | **Settings → Update yt-dlp** (or the banner button). YouTube breaks downloaders every few weeks. |
-| "Sign in to confirm you're not a bot" / age-restricted | **Settings → Use cookies from browser.** Pick the browser where you're logged in to YouTube. |
-| "Video unavailable" | The video was removed or is blocked in your country. Paste a different link. |
-| "JavaScript runtime missing" | `brew install deno`, then **Re-check** in Settings. |
-| "ffmpeg missing" | `brew install ffmpeg`, then **Re-check**. |
-| Spotify shows `INVALID_CLIENT: Invalid redirect URI` | Add exactly `http://127.0.0.1:8765/callback` as a Redirect URI in your Spotify app. |
-| "Your Spotify account isn't on this app's user list" | Spotify dashboard → your app → **User Management** → add your Spotify email. |
-| Can't import a playlist | You need to own it or collaborate on it (see the Spotify limitation above). |
-| "Port 8765 is in use" | Another app is using it. Change `"port"` in `~/Library/Application Support/DJ Crate/config.json`, and add the matching redirect URI in Spotify. |
-| Anything else | **Settings → Open logs** (`~/Library/Logs/DJ Crate/`). Attach `djcrate.log` to a GitHub issue. |
-
----
+| Lots of download failures | **Settings → Update yt-dlp.** YouTube breaks downloaders every few weeks. |
+| "Sign in to confirm you're not a bot" | **Settings → Use cookies from browser.** |
+| "Video unavailable" | Removed or blocked in your country. Use a different link. |
+| "JavaScript runtime" or "ffmpeg missing" | `brew install deno` / `brew install ffmpeg`, then **Re-check** in Settings. |
+| Spotify `INVALID_CLIENT: Invalid redirect URI` | Add exactly `http://127.0.0.1:8765/callback` in your Spotify app. |
+| "Not on this app's user list" | Spotify dashboard → your app → **User Management** → add the email. |
+| "Port 8765 is in use" | Change `"port"` in `~/Library/Application Support/DJ Crate/config.json` and the redirect URI to match. |
+| Anything else | **Settings → Open logs** and attach `djcrate.log` to a GitHub issue. |
 
 ## Development
 
 ```bash
 uv sync
 uv run python -m djcrate.main            # app window
-uv run python -m djcrate.main --browser  # same app in your browser (handy for dev tools)
-uv run pytest                            # tests
-python3 scripts/make_icon.py             # regenerate the app icon
+uv run python -m djcrate.main --browser  # in your browser (dev tools)
+uv run pytest
 ```
 
-- **Backend:** Python 3.12–3.13, FastAPI + uvicorn on `127.0.0.1:8765`, shown in a pywebview window. Data is in SQLite at `<library>/.djcrate/djcrate.db`. yt-dlp runs as a subprocess, ffmpeg converts, and mutagen writes the tags.
-- **Frontend:** plain HTML/CSS/JS modules in `djcrate/web/`, with no build step.
-- **Layout:** `djcrate/api.py` (routes), `db.py` (schema and migrations), `downloader.py` (queue and error handling), `spotify.py`, `yt_search.py`, `library.py` (files, relocate, import), `rekordbox.py` (XML in/out), `genres.py` (Genre Rack), `genre_lookup.py` (MusicBrainz suggestions), `backup.py`, `state.py` (open library, lock, health), `main.py` (window).
+Python 3.12–3.13, FastAPI on `127.0.0.1:8765` in a pywebview window, SQLite at `<library>/.djcrate/djcrate.db`, yt-dlp + ffmpeg + mutagen for downloads and tags. The frontend is plain JS modules in `djcrate/web/` with no build step.
 
 Downloading from YouTube may break YouTube's terms of service. DJ Crate only downloads links you choose; use it for music you have the right to use.

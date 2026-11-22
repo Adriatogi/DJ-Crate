@@ -23,6 +23,7 @@ UNKNOWN_RETRY_S = 86400  # try "couldn't check" songs again after a day
 DUE = """
 FROM tracks t
 WHERE (t.source_url LIKE '%youtube.com/%' OR t.source_url LIKE '%youtu.be/%')
+  AND t.trashed_at IS NULL AND t.hidden_at IS NULL
   AND (t.clean_url IS NULL OR t.clean_url <> t.source_url
        OR coalesce(json_extract(t.clean_check, '$.v'), 0) < {rules}
        OR (json_extract(t.clean_check, '$.result') = 'unknown' AND t.clean_checked_at < ?))
@@ -53,7 +54,7 @@ def status(conn, checker=None) -> dict:
     return {
         "on": db.get_setting(conn, "clean_check_on", "1") == "1",
         "pending": due_count(conn),
-        "flagged": conn.execute("SELECT count(*) FROM tracks t WHERE " + db.CLEAN_SQL).fetchone()[0],
+        "flagged": conn.execute(f"SELECT count(*) FROM tracks t WHERE {db.ACTIVE} AND " + db.CLEAN_SQL).fetchone()[0],
         "checked": conn.execute("SELECT count(*) FROM tracks WHERE clean_url IS NOT NULL AND clean_url = source_url").fetchone()[0],
         "linked": conn.execute("SELECT count(*) FROM tracks WHERE source_url LIKE '%youtube.com/%' OR source_url LIKE '%youtu.be/%'").fetchone()[0],
         "songs": conn.execute("SELECT count(*) FROM tracks").fetchone()[0],

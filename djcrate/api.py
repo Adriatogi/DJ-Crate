@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, backup, cleancheck, cutting, db, genius, genre_lookup, genres, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search, ytmusic
+from . import __version__, backup, cleancheck, trash, cutting, db, genius, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search, ytmusic
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -29,7 +29,6 @@ COOKIE_BROWSERS = ("", "safari", "chrome", "firefox", "edge", "brave", "chromium
 app = FastAPI(title="DJ Crate", docs_url=None, redoc_url=None)
 downloads = DownloadManager(state)
 search_ahead = yt_search.Prefetcher(state)
-genre_finder = genre_lookup.Finder(state)
 clean_checker = cleancheck.Checker(state)
 hooks: dict[str, Any] = {"focus": None}
 
@@ -134,7 +133,6 @@ def status():
             out["spotify"]["connected"] = spotify_connected(client_id, db.get_setting(conn, "library_id"))
             out["genius"]["configured"] = genius.configured(db.get_setting(conn, "library_id"))
             out["rekordbox"] = rekordbox.status(conn)
-            out["genres"] = genre_lookup.status(conn, genre_finder)
             out["clean"] = cleancheck.status(conn, clean_checker)
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
@@ -355,13 +353,15 @@ def import_folder(body: ImportFolderBody, conn=Depends(get_conn)):
 def sidebar(conn=Depends(get_conn)):
     smart = []
     for key, (label, cond) in db.SMART_CRATES.items():
-        n = conn.execute(f"SELECT count(*) FROM tracks t WHERE {cond}").fetchone()[0]
+        n = conn.execute(f"SELECT count(*) FROM tracks t WHERE {db.ACTIVE} AND {cond}").fetchone()[0]
         smart.append({"key": key, "name": label, "count": n})
+    bins = [{"key": key, "name": label, "count": conn.execute(f"SELECT count(*) FROM tracks t WHERE {cond}").fetchone()[0]}
+            for key, (label, cond) in db.BINS.items()]
     crates = [dict(r) for r in conn.execute("SELECT * FROM crates ORDER BY position, id")]
     members: dict[int, dict[int, tuple]] = {}
     for r in conn.execute(
         "SELECT ct.crate_id, ct.track_id, t.download_status = 'done' d "
-        "FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id"
+        f"FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id WHERE ct.removed_from_source = 0 AND {db.ACTIVE}"
     ):
         members.setdefault(r[0], {})[r[1]] = (r[2],)
     children: dict[int | None, list[dict]] = {}
@@ -387,7 +387,7 @@ def sidebar(conn=Depends(get_conn)):
             strip(n["children"])
 
     strip(tree)
-    return {"smart": smart, "tree": tree}
+    return {"smart": smart, "bins": bins, "tree": tree}
 
 
 def _create_crate(conn, name: str, kind: str, parent_id: int | None, spotify_playlist_id: str | None = None) -> int:
@@ -459,9 +459,12 @@ def update_crate(crate_id: int, body: CratePatch, conn=Depends(get_conn)):
 
 @app.delete("/api/crates/{crate_id}")
 def delete_crate(crate_id: int, conn=Depends(get_conn)):
+    """Songs that were only in this crate (or folder) go to the Trash; songs in other crates stay."""
     with db.tx(conn):
+        moved = trash.before_crate_delete(conn, crate_id)
         conn.execute("DELETE FROM crates WHERE id = ?", (crate_id,))
-    return {"ok": True}
+    _cancel_downloads(conn, moved.get("ids", []))
+    return {"ok": True, "trashed": moved["trashed"]}
 
 
 class IdsBody(BaseModel):
@@ -475,7 +478,6 @@ def add_tracks_to_crate(crate_id: int, body: IdsBody, conn=Depends(get_conn)):
         raise AppError("not_found", "That crate doesn't exist anymore.", 404)
     if crate["kind"] == "folder":
         raise AppError("is_folder", "Drop songs onto a crate, not a folder.")
-    genres.guard_not_genre_crate(conn, crate_id)
     with db.tx(conn):
         added = db.add_to_crate(conn, crate_id, body.ids)
     return {"added": added, "already": len(body.ids) - added}
@@ -484,7 +486,6 @@ def add_tracks_to_crate(crate_id: int, body: IdsBody, conn=Depends(get_conn)):
 @app.post("/api/crates/{crate_id}/tracks/remove")
 def remove_tracks_from_crate(crate_id: int, body: IdsBody, conn=Depends(get_conn)):
     """Only removes membership. Returns the removed rows so the UI can Undo."""
-    genres.guard_not_genre_crate(conn, crate_id)
     rows = [dict(r) for r in conn.execute(
         f"SELECT * FROM crate_tracks WHERE crate_id = ? AND track_id IN ({placeholders(body.ids)})", (crate_id, *body.ids))]
     with db.tx(conn):
@@ -498,7 +499,6 @@ class RestoreRows(BaseModel):
 
 @app.post("/api/crates/{crate_id}/tracks/restore")
 def restore_tracks_to_crate(crate_id: int, body: RestoreRows, conn=Depends(get_conn)):
-    genres.guard_not_genre_crate(conn, crate_id)
     with db.tx(conn):
         for r in body.rows:
             conn.execute(
@@ -518,16 +518,14 @@ LEFT JOIN (SELECT track_id, id job_id, status job_status, progress job_progress,
 
 
 @app.get("/api/tracks")
-def list_tracks(view: str = "smart:all", q: str = "", sub: int = 1, artist: str = "", others: int = 0, nogenre: int = 0, ingenre: int = 0,
-                mytag: str = "", conn=Depends(get_conn)):
+def list_tracks(view: str = "smart:all", q: str = "", mytag: str = "", conn=Depends(get_conn)):
     params: list = []
     search = ""
     params_search: list = []
     if q.strip():
         like = f"%{q.strip()}%"
-        search = (" AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ? OR t.notes LIKE ? OR t.rekordbox_mytags LIKE ? OR t.id IN "
-                  "(SELECT tg.track_id FROM track_genres tg JOIN genres g ON g.id = tg.genre_id WHERE g.name LIKE ?))")
-        params_search = [like] * 6
+        search = " AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ? OR t.notes LIKE ? OR t.rekordbox_mytags LIKE ?)"
+        params_search = [like] * 5
     if mytag.strip():  # exactly this Rekordbox My Tag (any case)
         search += (" AND t.rekordbox_mytags IS NOT NULL AND EXISTS "
                    "(SELECT 1 FROM json_each(t.rekordbox_mytags) WHERE lower(json_each.value) = lower(?))")
@@ -539,49 +537,25 @@ def list_tracks(view: str = "smart:all", q: str = "", sub: int = 1, artist: str 
             raise AppError("not_found", "That crate doesn't exist anymore.", 404)
         if crate["kind"] == "folder":
             ids = db.crate_descendants(conn, crate_id)
-            sql = (f"SELECT t.*, j.*, 0 removed_from_source FROM tracks t {JOB_JOIN} WHERE t.id IN "
-                   f"(SELECT track_id FROM crate_tracks WHERE crate_id IN ({placeholders(ids)})){search} "
+            sql = (f"SELECT t.*, j.*, 0 removed_from_source FROM tracks t {JOB_JOIN} WHERE {db.ACTIVE} AND t.id IN "
+                   f"(SELECT track_id FROM crate_tracks WHERE removed_from_source = 0 AND crate_id IN ({placeholders(ids)})){search} "
                    "ORDER BY t.title COLLATE NOCASE")
             params = [*ids, *params_search]
         else:
             sql = (f"SELECT t.*, j.*, ct.removed_from_source, ct.position FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id "
-                   f"{JOB_JOIN} WHERE ct.crate_id = ?{search} ORDER BY ct.removed_from_source, ct.position")
+                   f"{JOB_JOIN} WHERE ct.crate_id = ? AND ct.removed_from_source = 0 AND {db.ACTIVE}{search} ORDER BY ct.position")
             params = [crate_id, *params_search]
-    elif view.startswith("genre:"):
-        key = view.split(":", 1)[1]
-        if key == "none":
-            cond, gparams = "NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id)", []
-        else:
-            try:
-                gid = int(key)
-            except ValueError:
-                raise AppError("not_found", "Unknown view.", 404)
-            genres.get(conn, gid)
-            gids = genres.descendants(conn, gid) if sub else [gid]
-            # others=1 flips it: every song that is NOT in this genre (to pick songs to add)
-            cond = f"t.id {'NOT ' if others else ''}IN (SELECT track_id FROM track_genres WHERE genre_id IN ({placeholders(gids)}))"
-            gparams = gids
-            if others and nogenre:  # only songs that have no genre at all yet
-                cond += " AND NOT EXISTS (SELECT 1 FROM track_genres g2 WHERE g2.track_id = t.id)"
-            elif others and ingenre:  # only songs that are in another given genre (or its sub-genres)
-                fids = genres.descendants(conn, ingenre)
-                cond += f" AND t.id IN (SELECT track_id FROM track_genres WHERE genre_id IN ({placeholders(fids)}))"
-                gparams = [*gparams, *fids]
-        sql = f"SELECT t.*, j.* FROM tracks t {JOB_JOIN} WHERE {cond}{search} ORDER BY t.title COLLATE NOCASE, t.artists COLLATE NOCASE"
-        params = [*gparams, *params_search]
     else:
         key = view.split(":", 1)[1] if ":" in view else "all"
-        if key not in db.SMART_CRATES:
+        if key in db.BINS:   # Trash / Hidden: newest first
+            cond, order = db.BINS[key][1], "coalesce(t.trashed_at, t.hidden_at) DESC, t.title COLLATE NOCASE"
+        elif key in db.SMART_CRATES:
+            cond, order = f"{db.ACTIVE} AND {db.SMART_CRATES[key][1]}", "t.title COLLATE NOCASE, t.artists COLLATE NOCASE"
+        else:
             raise AppError("not_found", "Unknown view.", 404)
-        cond = db.SMART_CRATES[key][1]
-        sql = f"SELECT t.*, j.* FROM tracks t {JOB_JOIN} WHERE {cond}{search} ORDER BY t.title COLLATE NOCASE, t.artists COLLATE NOCASE"
+        sql = f"SELECT t.*, j.* FROM tracks t {JOB_JOIN} WHERE {cond}{search} ORDER BY {order}"
         params = params_search
-    out = [db.track_to_dict(r) for r in conn.execute(sql, params)]
-    if artist.strip():
-        want = genres.norm(artist)
-        out = [t for t in out if want in {genres.norm(a) for a in genres.split_artists(t["artists"])}]
-    genres.attach(conn, out)
-    return {"tracks": out}
+    return {"tracks": [db.track_to_dict(r) for r in conn.execute(sql, params)]}
 
 
 class NewTrack(BaseModel):
@@ -660,13 +634,13 @@ def update_track(track_id: int, body: TrackPatch, conn=Depends(get_conn)):
     return {"track": updated, "warnings": warnings}
 
 
-def _write_file_tags(conn, track: dict, fetch_cover: bool, clear_genre: bool = False) -> str | None:
+def _write_file_tags(conn, track: dict, fetch_cover: bool) -> str | None:
     p = state.abs_path(track.get("file_rel_path"))
     if not p or not p.is_file() or track["download_status"] != "done":
         return None
     try:
         cover, mime = downloads._cover(track.get("cover_url")) if fetch_cover else (None, "image/jpeg")
-        tags.write_tags(p, {**track, "genre_tag": genres.genre_tag_for(conn, track["id"], clear=clear_genre)}, cover, mime)
+        tags.write_tags(p, track, cover, mime)
         conn.execute("UPDATE tracks SET tag_error = NULL WHERE id = ?", (track["id"],))
         return None
     except Exception as e:
@@ -769,13 +743,58 @@ def set_clean_check(body: CleanOnBody, conn=Depends(get_conn)):
     return cleancheck.status(conn, clean_checker)
 
 
+def _cancel_downloads(conn, ids) -> None:
+    ids = list(ids)
+    if not ids:
+        return
+    for job in conn.execute(f"SELECT id FROM jobs WHERE track_id IN ({placeholders(ids)}) AND status IN ('queued','running','interrupted')", ids):
+        downloads.cancel(conn, job["id"])
+
+
+@app.post("/api/tracks/trash")
+def trash_tracks(body: IdsBody, conn=Depends(get_conn)):
+    """Move songs to the Trash. Nothing is deleted until the Trash is emptied."""
+    with db.tx(conn):
+        n = trash.trash(conn, body.ids, {"kind": "deleted"})
+    _cancel_downloads(conn, body.ids)
+    return {"trashed": n}
+
+
+@app.post("/api/tracks/restore")
+def restore_tracks(body: IdsBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        n = trash.restore(conn, body.ids)
+    return {"restored": n}
+
+
+class HideBody(BaseModel):
+    ids: list[int]
+    hidden: bool = True
+
+
+@app.post("/api/tracks/hide")
+def hide_tracks(body: HideBody, conn=Depends(get_conn)):
+    """Hide songs from every view (or show them again). Nothing is deleted."""
+    with db.tx(conn):
+        n = trash.set_hidden(conn, body.ids, body.hidden)
+    return {"changed": n}
+
+
+@app.post("/api/trash/empty")
+def empty_trash(conn=Depends(get_conn)):
+    """Permanently delete every song in the Trash (their MP3s go to the macOS Trash)."""
+    ids = [r[0] for r in conn.execute("SELECT id FROM tracks WHERE trashed_at IS NOT NULL")]
+    if not ids:
+        return {"deleted": 0, "trashed_files": 0, "failed": []}
+    return delete_tracks(IdsBody(ids=ids), conn)
+
+
 @app.post("/api/tracks/delete")
 def delete_tracks(body: IdsBody, conn=Depends(get_conn)):
     """Delete from library: MP3s go to the macOS Trash, rows are removed.
     Set Setter rows keep their label so your set notes still read right."""
     rows = conn.execute(f"SELECT id, title, artists, file_rel_path FROM tracks WHERE id IN ({placeholders(body.ids)})", body.ids).fetchall()
-    for job in conn.execute(f"SELECT id FROM jobs WHERE track_id IN ({placeholders(body.ids)}) AND status IN ('queued','running','interrupted')", body.ids):
-        downloads.cancel(conn, job["id"])
+    _cancel_downloads(conn, body.ids)
     trashed, failed, failed_ids = 0, [], set()
     for r in rows:
         p = state.abs_path(r["file_rel_path"])
@@ -865,6 +884,8 @@ class ViewBody(BaseModel):
 
 @app.post("/api/downloads/all")
 def download_all(body: ViewBody, conn=Depends(get_conn)):
+    if body.view.split(":", 1)[-1] in db.BINS:
+        return {"queued": 0, "skipped": []}
     tracks = list_tracks(body.view, "", conn=conn)["tracks"]
     ids = [t["id"] for t in tracks if (t["source_url"] or "") and t["download_status"] in ("none", "error")]
     if not ids:
@@ -1040,8 +1061,13 @@ def resync(crate_id: int, conn=Depends(get_conn)):
             conn.execute("UPDATE crate_tracks SET removed_from_source = 1 WHERE crate_id = ? AND track_id = ?", (crate_id, tid))
         for tid in plan["restored"]:
             conn.execute("UPDATE crate_tracks SET removed_from_source = 0 WHERE crate_id = ? AND track_id = ?", (crate_id, tid))
+        # Removed from the playlist and in no other crate: to the Trash. Back on the playlist: out of it again.
+        trashed_ids = trash.orphans(conn, plan["removed"], [crate_id])
+        trashed = trash.trash(conn, trashed_ids, {"kind": "spotify", "crate": crate["name"], "crate_id": crate_id})
+        trash.after_spotify_return(conn, crate_id, plan["restored"])
         conn.execute("UPDATE crates SET last_synced = datetime('now') WHERE id = ?", (crate_id,))
-    return {"crate_id": crate_id, "name": crate["name"], "added": len(plan["add"]), "removed": len(plan["removed"]),
+    _cancel_downloads(conn, trashed_ids)
+    return {"crate_id": crate_id, "name": crate["name"], "added": len(plan["add"]), "removed": len(plan["removed"]), "trashed": trashed,
             "restored": len(plan["restored"]), "skipped": data["skipped"]}
 
 
@@ -1266,242 +1292,6 @@ def get_samples(track_id: int, conn=Depends(get_conn)):
     return cutting.samples_of(conn, track_id)
 
 
-# ---------------------------------------------------------------- genre rack
-
-def _retag(conn, track_ids) -> dict:
-    """Write each affected downloaded song's MP3 genre tag from the rack."""
-    done, warns = 0, []
-    for tid in dict.fromkeys(track_ids or []):
-        t = db.get_track(conn, tid)
-        if not t or t["download_status"] != "done":
-            continue
-        w = _write_file_tags(conn, t, False, clear_genre=True)
-        if w:
-            warns.append(f"{t['title']}: {w}")
-        else:
-            done += 1
-    return {"retagged": done, "tag_warnings": warns[:5]}
-
-
-def _genre_change(conn, fn) -> dict:
-    """Run a rack edit, keep genre crates in step, then re-tag the songs it touched."""
-    with db.tx(conn):
-        affected = fn()
-        genres.sync_crates(conn)
-    return _retag(conn, affected)
-
-
-@app.get("/api/genres")
-def get_genres(conn=Depends(get_conn)):
-    return {"tree": genres.tree(conn), "unsorted": genres.unsorted_count(conn),
-            "ignored": [r[0] for r in conn.execute("SELECT norm FROM genre_ignored ORDER BY norm")]}
-
-
-class GenreBody(BaseModel):
-    name: str
-    parent_id: int | None = None
-
-
-@app.post("/api/genres")
-def create_genre(body: GenreBody, conn=Depends(get_conn)):
-    with db.tx(conn):
-        gid = genres.create(conn, body.name, body.parent_id)
-    return {"id": gid}
-
-
-class GenrePatch(BaseModel):
-    name: str | None = None
-    move: bool = False
-    parent_id: int | None = None
-    index: int | None = None
-
-
-@app.patch("/api/genres/{genre_id}")
-def update_genre(genre_id: int, body: GenrePatch, conn=Depends(get_conn)):
-    def go():
-        affected = []
-        if body.name is not None:
-            affected += genres.rename(conn, genre_id, body.name)
-        if body.move:
-            affected += genres.move(conn, genre_id, body.parent_id, body.index)
-        return affected
-    return _genre_change(conn, go)
-
-
-@app.delete("/api/genres/{genre_id}")
-def delete_genre(genre_id: int, conn=Depends(get_conn)):
-    return _genre_change(conn, lambda: genres.delete(conn, genre_id))
-
-
-class MergeBody(BaseModel):
-    into: int
-
-
-@app.post("/api/genres/{genre_id}/merge")
-def merge_genre(genre_id: int, body: MergeBody, conn=Depends(get_conn)):
-    return _genre_change(conn, lambda: genres.merge(conn, genre_id, body.into))
-
-
-class AliasBody(BaseModel):
-    name: str
-
-
-@app.post("/api/genres/{genre_id}/aliases")
-def add_genre_alias(genre_id: int, body: AliasBody, conn=Depends(get_conn)):
-    with db.tx(conn):
-        genres.add_alias(conn, genre_id, body.name)
-    return {"ok": True}
-
-
-@app.delete("/api/genres/aliases/{key}")
-def remove_genre_alias(key: str, conn=Depends(get_conn)):
-    with db.tx(conn):
-        genres.remove_alias(conn, key)
-    return {"ok": True}
-
-
-@app.post("/api/genres/ignore")
-def ignore_genre_name(body: AliasBody, conn=Depends(get_conn)):
-    with db.tx(conn):
-        genres.ignore(conn, body.name)
-    return {"ok": True}
-
-
-@app.post("/api/genres/unignore")
-def unignore_genre_name(body: AliasBody, conn=Depends(get_conn)):
-    with db.tx(conn):
-        genres.unignore(conn, body.name)
-    return {"ok": True}
-
-
-class TrackGenresBody(BaseModel):
-    genre_ids: list[int]
-
-
-@app.put("/api/tracks/{track_id}/genres")
-def set_track_genres(track_id: int, body: TrackGenresBody, conn=Depends(get_conn)):
-    if not db.get_track(conn, track_id):
-        raise AppError("not_found", "That song doesn't exist anymore.", 404)
-    out = _genre_change(conn, lambda: (genres.set_track_genres(conn, track_id, body.genre_ids), [track_id])[1])
-    return {"track": db.get_track(conn, track_id), **out}
-
-
-class BulkGenreBody(BaseModel):
-    ids: list[int]
-    genre_id: int
-    action: str = "add"
-
-
-@app.post("/api/tracks/genres")
-def bulk_track_genres(body: BulkGenreBody, conn=Depends(get_conn)):
-    if body.action not in ("add", "remove"):
-        raise AppError("bad_field", "Unknown action.")
-    fn = genres.add_to_tracks if body.action == "add" else genres.remove_from_tracks
-    out = _genre_change(conn, lambda: fn(conn, body.ids, body.genre_id))
-    return {"changed": out["retagged"], **out}
-
-
-@app.get("/api/genre_artists")
-def genre_artists(view: str = "genre:none", sub: int = 1, conn=Depends(get_conn)):
-    """Artists of the songs in a rack view, with how many songs each has. Derived, never set."""
-    tracks = list_tracks(view=view, sub=sub, conn=conn)["tracks"]
-    counts: dict[str, list] = {}
-    for t in tracks:
-        for a in genres.split_artists(t["artists"]):
-            entry = counts.setdefault(genres.norm(a), [a, 0])
-            entry[1] += 1
-    ranked = sorted(counts.values(), key=lambda e: (-e[1], e[0].lower()))
-    return {"artists": [{"name": n, "count": c} for n, c in ranked], "songs": len(tracks)}
-
-
-class LookupBody(BaseModel):
-    on: bool
-
-
-@app.put("/api/genres/lookup")
-def set_genre_lookup(body: LookupBody, conn=Depends(get_conn)):
-    with db.tx(conn):
-        db.set_setting(conn, "genre_lookup_on", "1" if body.on else "0")
-    return genre_lookup.status(conn, genre_finder)
-
-
-@app.get("/api/genres/musicbrainz")
-def musicbrainz_genres(q: str = "", conn=Depends(get_conn)):
-    """MusicBrainz's genre names, to browse and add to your rack. Reference only: nothing is tagged by it."""
-    if not q.strip():
-        return {"mode": "needed", "genres": genres.needed_from_musicbrainz(conn)}
-    names, at, error = genre_lookup.genre_list(conn)
-    key = genres.norm(q)
-    shown = [n for n in names if key in genres.norm(n)]
-    in_rack = {n: genres.resolve(conn, n) for n in shown[:150]}
-    return {"mode": "search", "total": len(names), "matches": len(shown), "fetched_at": at, "error": error,
-            "genres": [{"name": n, "genre_id": in_rack[n]} for n in shown[:150]]}
-
-
-@app.get("/api/genres/incoming")
-def incoming_genres(conn=Depends(get_conn)):
-    """Every genre name found in Rekordbox or your MP3s, and whether the rack knows it."""
-    found: dict[str, dict] = {}
-    for r in conn.execute("SELECT t.id, t.rekordbox_genre, t.file_genre, "
-                          "NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id) AS unsorted FROM tracks t"):
-        for source, text in (("Rekordbox", r["rekordbox_genre"]), ("MP3", r["file_genre"])):
-            for part in genres.split_names(text):
-                e = found.setdefault(genres.norm(part), {"name": part, "songs": set(), "unsorted": set(), "sources": set()})
-                e["songs"].add(r["id"])
-                e["sources"].add(source)
-                if r["unsorted"]:
-                    e["unsorted"].add(r["id"])
-    items = []
-    for e in found.values():
-        gid = genres.resolve(conn, e["name"])
-        items.append({"name": e["name"], "songs": len(e["songs"]), "unsorted": len(e["unsorted"]),
-                      "sources": sorted(e["sources"]), "ignored": genres.is_ignored(conn, e["name"]),
-                      "genre_id": gid, "path": genres.path(conn, gid) if gid else None})
-    items.sort(key=lambda i: (-i["songs"], i["name"].lower()))
-    return {"items": items}
-
-
-@app.post("/api/genres/incoming/apply")
-def apply_incoming_genres(conn=Depends(get_conn)):
-    """Give songs that have no genre the rack genres their Rekordbox/MP3 genre names resolve to."""
-    changed = []
-    with db.tx(conn):
-        for r in conn.execute("SELECT t.id, t.rekordbox_genre, t.file_genre FROM tracks t "
-                              "WHERE NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id)").fetchall():
-            ids: list[int] = []
-            for text in (r["rekordbox_genre"], r["file_genre"]):
-                for part in genres.split_names(text):
-                    gid = genres.resolve(conn, part)
-                    if gid is not None and gid not in ids:
-                        ids.append(gid)
-            # "House / Deep House" shouldn't tag the song with both: keep only the most specific
-            ids = [g for g in ids if not any(g != o and g in genres.ancestors(conn, o) for o in ids)]
-            if ids:
-                genres.set_track_genres(conn, r["id"], ids)
-                changed.append(r["id"])
-        genres.sync_crates(conn)
-    return {"assigned": len(changed), **_retag(conn, changed)}
-
-
-class GenreCrateBody(BaseModel):
-    parent_id: int | None = None
-
-
-@app.post("/api/genres/{genre_id}/crate")
-def make_genre_crate(genre_id: int, body: GenreCrateBody, conn=Depends(get_conn)):
-    with db.tx(conn):
-        cid = genres.make_crate(conn, genre_id, body.parent_id)
-    return {"crate_id": cid}
-
-
-@app.post("/api/crates/{crate_id}/unfollow")
-def unfollow_genre(crate_id: int, conn=Depends(get_conn)):
-    """The crate stops following its genre and keeps its songs as a normal crate."""
-    with db.tx(conn):
-        conn.execute("UPDATE crates SET genre_id = NULL WHERE id = ?", (crate_id,))
-    return {"ok": True}
-
-
 # ---------------------------------------------------------------- rekordbox (BPM & key in, playlists out)
 
 class XmlBody(BaseModel):
@@ -1517,7 +1307,7 @@ def list_mytags(conn=Depends(get_conn)):
     """Every Rekordbox My Tag found in the XML export, with how many songs have it. Read-only."""
     rows = conn.execute(
         "SELECT min(j.value) AS name, count(DISTINCT t.id) AS songs FROM tracks t, json_each(t.rekordbox_mytags) j "
-        "WHERE t.rekordbox_mytags IS NOT NULL GROUP BY lower(j.value) ORDER BY lower(j.value)").fetchall()
+        f"WHERE t.rekordbox_mytags IS NOT NULL AND {db.ACTIVE} GROUP BY lower(j.value) ORDER BY lower(j.value)").fetchall()
     return {"tags": [{"name": r["name"], "songs": r["songs"]} for r in rows]}
 
 

@@ -310,6 +310,38 @@ MIGRATIONS.append(  # v11: Rekordbox My Tags (read-only), read from the Comments
     """
 )
 
+MIGRATIONS.append(  # v12: Trash and Hidden. Songs already removed on Spotify and in no other crate go to the Trash.
+    """
+    ALTER TABLE tracks ADD COLUMN trashed_at REAL;
+    ALTER TABLE tracks ADD COLUMN trash_reason TEXT;
+    ALTER TABLE tracks ADD COLUMN hidden_at REAL;
+    UPDATE tracks SET trashed_at = CAST(strftime('%s', 'now') AS REAL),
+      trash_reason = (SELECT json_object('kind', 'spotify', 'crate', c.name, 'crate_id', c.id)
+                      FROM crate_tracks ct JOIN crates c ON c.id = ct.crate_id
+                      WHERE ct.track_id = tracks.id AND ct.removed_from_source = 1 LIMIT 1)
+    WHERE EXISTS (SELECT 1 FROM crate_tracks ct WHERE ct.track_id = tracks.id AND ct.removed_from_source = 1)
+      AND NOT EXISTS (SELECT 1 FROM crate_tracks ct JOIN crates c ON c.id = ct.crate_id
+                      WHERE ct.track_id = tracks.id AND ct.removed_from_source = 0 AND c.genre_id IS NULL)
+    """
+)
+
+MIGRATIONS.append(  # v13: the Genre Rack is gone for now: its genres, song genres, genre crates and suggestions are deleted.
+    # Genres already written into MP3 files are left alone.
+    """
+    DELETE FROM crates WHERE genre_id IS NOT NULL;
+    DROP TABLE track_genres;
+    DROP TABLE genre_aliases;
+    DROP TABLE genre_ignored;
+    DROP TABLE genre_suggest;
+    DROP TABLE mb_artist_genres;
+    ALTER TABLE crates DROP COLUMN genre_id;
+    DROP TABLE genres;
+    ALTER TABLE tracks DROP COLUMN rekordbox_genre;
+    ALTER TABLE tracks DROP COLUMN file_genre;
+    DELETE FROM settings WHERE key IN ('genre_lookup_on', 'mb_genre_list', 'mb_genre_list_at')
+    """
+)
+
 SCHEMA_VERSION = len(MIGRATIONS)
 
 # The song's current link is the clean copy of a song YouTube Music also has as explicit.
@@ -320,6 +352,15 @@ CHECK_VERSION_SQL = (
     "(t.download_status = 'done' AND t.duration_ms IS NOT NULL "
     f"AND t.file_duration_ms IS NOT NULL AND abs(t.file_duration_ms - t.duration_ms) > {LENGTH_TOLERANCE_MS})"
 )
+
+# Songs that show anywhere: not in the Trash and not hidden. Every view, count and export uses this.
+ACTIVE = "(t.trashed_at IS NULL AND t.hidden_at IS NULL)"
+
+# The two bins at the bottom of the sidebar (they are *not* filtered by ACTIVE).
+BINS: dict[str, tuple[str, str]] = {
+    "hidden": ("Hidden", "(t.hidden_at IS NOT NULL AND t.trashed_at IS NULL)"),
+    "trash": ("Trash", "t.trashed_at IS NOT NULL"),
+}
 
 SMART_CRATES: dict[str, tuple[str, str]] = {
     "all": ("All Tracks", "1"),
@@ -503,6 +544,10 @@ def track_to_dict(row) -> dict:
         d["clean"] = json.loads(raw) if current else None
         d.pop("clean_keep", None)   # no longer used (labels are neutral, nothing to dismiss)
         d["clean_flag"] = bool(d["clean"] and d["clean"].get("result") == "clean")
+    if "trashed_at" in d:
+        reason = d.pop("trash_reason", None)
+        d["trash"] = {**(json.loads(reason) if reason else {}), "at": d["trashed_at"]} if d["trashed_at"] else None
+        d["hidden"] = bool(d.get("hidden_at"))
     if "rekordbox_mytags" in d:
         raw = d.pop("rekordbox_mytags")
         d["mytags"] = json.loads(raw) if raw else []   # read-only: they're edited in Rekordbox
@@ -513,10 +558,7 @@ def get_track(conn, track_id: int):
     row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
     if not row:
         return None
-    from . import genres
-    t = track_to_dict(row)
-    genres.attach(conn, [t])
-    return t
+    return track_to_dict(row)
 
 
 def add_to_crate(conn, crate_id: int, track_ids) -> int:
@@ -531,6 +573,8 @@ def add_to_crate(conn, crate_id: int, track_ids) -> int:
         if cur.rowcount:
             pos += 1
             added += 1
+            # A song added to a crate is wanted again: it leaves the Trash.
+            conn.execute("UPDATE tracks SET trashed_at = NULL, trash_reason = NULL WHERE id = ? AND trashed_at IS NOT NULL", (tid,))
     return added
 
 

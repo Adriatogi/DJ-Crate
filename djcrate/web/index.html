@@ -14,7 +14,6 @@
       <button class="tab active" data-tab="crates">Crates</button>
       <button class="tab" data-tab="cutting">Cutting</button>
       <button class="tab" data-tab="sets">Set Setter</button>
-      <button class="tab" data-tab="rack">Genre Rack</button>
       <button class="tab" data-tab="docs">Docs</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -52,6 +51,7 @@
         </div>
         <div id="tree"></div>
         <div id="tree-root-drop" class="root-drop">Drop here to move to top level</div>
+        <nav id="bin-list"></nav>
       </aside>
 
       <section id="main-pane">
@@ -65,6 +65,7 @@
           <button id="btn-mytags" class="btn mytags-only">My Tags ▾</button>
           <button id="btn-sort" class="btn" title="Sort">Sort ▾</button>
           <button id="btn-resync" class="btn" hidden>↻ Re-sync from Spotify</button>
+          <button id="btn-empty-trash" class="btn danger" hidden>Empty Trash…</button>
           <button id="btn-swap-all" class="btn" hidden title="Swap every song here to its explicit version">Swap all to explicit</button>
           <button id="btn-download-all" class="btn primary">⬇ Download All</button>
           <button id="btn-view-menu" class="icon-btn" title="More">⋯</button>
@@ -82,7 +83,6 @@
                 <th class="c-time sortable" data-sort="duration">Time</th>
                 <th class="c-bpm sortable" data-sort="bpm" title="From your Rekordbox export (Settings → Rekordbox)">BPM</th>
                 <th class="c-key sortable" data-sort="musical_key" title="Camelot · musical key, from your Rekordbox export">Key</th>
-                <th class="c-genre sortable" data-sort="genre" title="From your Genre Rack. Written into the MP3's Genre tag.">Genre</th>
                 <th class="c-mytags sortable" data-sort="mytags" title="Your My Tags from Rekordbox (read-only). They come from the Comments in your Rekordbox XML export. See Settings → Rekordbox.">My Tags</th>
                 <th class="c-link">YouTube link</th>
                 <th class="c-play"></th>
@@ -101,7 +101,6 @@
 
     <div id="view-cutting" class="view"></div>
     <div id="view-sets" class="view"></div>
-    <div id="view-rack" class="view"></div>
     <div id="view-docs" class="view"></div>
     <div id="view-settings" class="view"></div>
   </main>

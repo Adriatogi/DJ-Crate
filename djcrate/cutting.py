@@ -258,9 +258,9 @@ def delete_sample(conn, sample_id: int) -> None:
 # ---------------------------------------------------------------- song list + boards
 
 def cutting_songs(conn, q: str = "", only_connected: bool = False) -> list[dict]:
-    where, params = "1", []
+    where, params = db.ACTIVE, []
     if q.strip():
-        where = "(t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ?)"
+        where = f"{db.ACTIVE} AND (t.title LIKE ? OR t.artists LIKE ? OR t.album LIKE ?)"
         params = [f"%{q.strip()}%"] * 3
     rows = conn.execute(f"""
         SELECT t.id, t.title, t.artists, t.cover_url,
