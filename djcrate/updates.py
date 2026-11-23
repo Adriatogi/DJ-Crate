@@ -7,9 +7,11 @@ Turn it off in Settings (`update_check` in config.json).
 """
 
 import logging
+import os
 import re
 import threading
 import time
+from pathlib import Path
 
 import httpx
 
@@ -39,10 +41,17 @@ def set_enabled(on: bool) -> None:
     config.update_config(update_check=bool(on))
 
 
+def fake_version() -> str | None:
+    """--fake-update 9.9.9 (or DJCRATE_FAKE_UPDATE): pretend that version is out, to see the banner."""
+    return os.environ.get("DJCRATE_FAKE_UPDATE") or None
+
+
 def cached() -> dict:
     """What the UI needs, without touching the network."""
     info = config.load_config().get("update") or {}
     latest = info.get("latest")
+    if fake_version():
+        info, latest = {"url": RELEASES_URL, "checked_at": time.time()}, fake_version()
     return {
         "enabled": enabled(),
         "current": __version__,
@@ -51,11 +60,24 @@ def cached() -> dict:
         "available": bool(latest) and _key(latest) > _key(__version__),
         "checked_at": info.get("checked_at"),
         "install": "app" if config.BUNDLED else "git",
+        "command": update_command(),
     }
+
+
+def update_command() -> str | None:
+    """For a source install: the exact Terminal command that updates it."""
+    if config.BUNDLED:
+        return None
+    script = config.REPO_DIR / "scripts" / "update.sh"
+    home = str(Path.home())
+    path = "~" + str(script)[len(home):] if str(script).startswith(home + "/") else str(script)
+    return path if " " not in path else "'" + str(script).replace("'", "'\\''") + "'"
 
 
 def check(force: bool = False, client: httpx.Client | None = None) -> dict:
     """Ask GitHub for the latest release (unless checked in the last day). Never raises."""
+    if fake_version():
+        return cached()
     with _lock:
         info = dict(config.load_config().get("update") or {})
         if not force and (not enabled() or time.time() - (info.get("checked_at") or 0) < CHECK_EVERY_S):

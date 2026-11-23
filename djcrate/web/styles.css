@@ -574,3 +574,6 @@ body.no-mytags .c-mytags, body.no-mytags .mytags-only { display: none; }
 .onboarding .ob-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 12px; }
 .onboarding .ob-foot a { color: var(--accent-2); }
 .cookie-result { display: flex; flex-direction: column; gap: 4px; margin: -2px 0 4px; }
+.onboarding .ob-sub { margin: 2px 0 2px; padding-left: 16px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.onboarding .ob-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.update-steps ol { margin: 6px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }

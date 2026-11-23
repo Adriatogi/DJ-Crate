@@ -4,7 +4,7 @@ import { del, get, native, patch, post, put } from "./api.js";
 import { openDocsAt } from "./docs.js";
 import { showOnboarding } from "./onboarding.js";
 import { emit, store } from "./store.js";
-import { confirmDialog, copyText, errorToast, fill, h, modal, toast, toolOutput } from "./ui.js";
+import { confirmDialog, copyText, errorToast, fill, h, modal, toast, toolOutput, updateSteps } from "./ui.js";
 
 const root = () => document.getElementById("view-settings");
 
@@ -57,7 +57,10 @@ export async function showSettings() {
         h("button", { class: "btn small", onclick: async () => { await copyText(s.redirect_uri); toast("Copied."); } }, "Copy")),
       h("li", {}, "Open the app's Settings, copy the ", h("b", {}, "Client ID"), ", paste it here, Save, then Log in.")),
     h("div", { class: "line" }, cid, saveCid, loginBtn),
-    h("p", { class: "muted small" }, "Your login is stored in the macOS Keychain, not in the library folder."));
+    h("p", { class: "muted small" }, "Your login is stored in the macOS Keychain, not in the library folder."),
+    h("details", { class: "small" }, h("summary", {}, "Why do I need my own Spotify app?"),
+      h("p", { class: "muted" }, "Spotify only lets a hobby app's creator approve about 25 people by hand, and opening an app to everyone is only offered to registered companies with a large user base. So each DJ makes their own free app: it's just for you, takes about 2 minutes, and your login never leaves your Mac."),
+      h("p", { class: "muted" }, "DJ Crate only reads your playlists (names, artists, lengths, covers). It never changes anything in your Spotify account.")));
 
   // ---- Genius (sample lookup)
   const gConnected = !!store.status?.genius?.configured;
@@ -244,9 +247,9 @@ function aboutCard(s, card) {
   return card("About",
     h("div", { class: "line" }, h("b", {}, `DJ Crate ${s.version || store.status?.version || ""}`), line, check),
     h("label", { class: "row gap", style: { cursor: "pointer" } }, auto, "Check for new versions (once a day, asks GitHub; nothing is sent about you)"),
-    h("p", { class: "muted small" }, s.install === "app"
-      ? "To update, download the new version and replace the app. Your music, crates and settings live outside the app and are kept."
-      : "You're running from the source code: update with scripts/update.sh."),
+    s.install === "app"
+      ? h("p", { class: "muted small" }, "To update, download the new version and replace the app. Your music, crates and settings live outside the app and are kept.")
+      : h("details", { class: "small" }, h("summary", {}, "How to update"), updateSteps(up, post)),
     h("div", { class: "line" }, h("button", { class: "btn small", onclick: () => { showOnboarding(); emit("show-tab", "crates"); } }, "Setup guide"),
       h("button", { class: "btn small", onclick: () => openDocsAt("start") }, "Getting started (Docs)")),
     h("p", { class: "muted small" }, link("https://adriatogi.github.io/DJ-Crate/", "Website"), " · ",

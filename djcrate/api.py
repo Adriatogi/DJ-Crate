@@ -160,6 +160,7 @@ def _onboarding(conn) -> dict:
     out = {
         "asked": db.get_setting(conn, "onboarding_asked") == "1",
         "dismissed": db.get_setting(conn, "onboarding_dismissed") == "1",
+        "skipped_rekordbox": db.get_setting(conn, "onboarding_skip_rekordbox") == "1",
         "playlists": one("SELECT count(*) FROM crates WHERE kind = 'spotify'"),
         "linked": one(f"SELECT count(*) FROM tracks t WHERE coalesce(t.source_url, '') <> '' AND {db.ACTIVE}"),
         "downloaded": one(f"SELECT count(*) FROM tracks t WHERE t.download_status = 'done' AND {db.ACTIVE}"),
@@ -175,6 +176,7 @@ def _onboarding(conn) -> dict:
 class OnboardingBody(BaseModel):
     dismissed: bool | None = None
     asked: bool | None = None
+    skipped_rekordbox: bool | None = None
 
 
 @app.post("/api/onboarding")
@@ -184,6 +186,8 @@ def set_onboarding(body: OnboardingBody, conn=Depends(get_conn)):
             db.set_setting(conn, "onboarding_dismissed", "1" if body.dismissed else "0")
         if body.asked is not None:
             db.set_setting(conn, "onboarding_asked", "1" if body.asked else "0")
+        if body.skipped_rekordbox is not None:
+            db.set_setting(conn, "onboarding_skip_rekordbox", "1" if body.skipped_rekordbox else "0")
     return _onboarding(conn)
 
 
@@ -1527,6 +1531,13 @@ def test_cookies(conn=Depends(get_conn)):
         return cookies.export(browser, db.get_setting(conn, "cookies_profile", ""))
     except cookies.CookieError as e:
         return {"ok": False, "code": e.code, "message": e.message, "output": e.output}
+
+
+@app.post("/api/update/terminal")
+def open_terminal():
+    """Open the Terminal app (the user pastes the update command there)."""
+    tools.open_app("Terminal")
+    return {"ok": True}
 
 
 @app.post("/api/update/check")

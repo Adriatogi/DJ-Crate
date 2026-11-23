@@ -9,7 +9,6 @@ import { emit } from "./store.js";
 import { errorToast, h, modal } from "./ui.js";
 
 let lastKey = "";
-let forced = false;   // reopened from Settings
 let asking = false;   // the "want a walkthrough?" popup is open
 
 function ask() {
@@ -36,34 +35,43 @@ function steps(s) {
     { done: true, title: "Create a library", text: "Done. Your music and crates live in this folder." },
     {
       done: !!s.spotify?.connected, title: "Connect Spotify",
-      text: "About 2 minutes, once. Needs Spotify Premium: you make a free developer app and paste its Client ID.",
-      action: ["Set up", () => emit("show-tab", "settings")],
+      text: "About 2 minutes, once (needs Spotify Premium). You make your own free Spotify developer app and paste its Client ID: Spotify only lets a hobby app approve ~25 people, so everyone gets their own. Settings walks you through it.",
+      actions: [["Set up", () => emit("show-tab", "settings"), true]],
     },
     {
       done: ob.playlists > 0, title: "Import a playlist",
       text: "It becomes a crate with every song's title, artists, cover and length.",
-      action: ["Import", () => { emit("show-tab", "crates"); emit("import-spotify"); }],
+      actions: [["Import", () => { emit("show-tab", "crates"); emit("import-spotify"); }, true]],
     },
     {
       done: ob.linked > 0, title: "Pick the YouTube links",
       text: "In Needs Link, click Find ▾ on a song (the green result matches Spotify's length), or Auto-fill links to fill the sure ones.",
-      action: ["Needs Link", () => { emit("show-tab", "crates"); emit("select-view", "smart:needs_link"); }],
+      actions: [["Needs Link", () => { emit("show-tab", "crates"); emit("select-view", "smart:needs_link"); }, true]],
     },
     {
       done: ob.downloaded > 0, title: "Download",
       text: "Ready to Download → Download All. Each song becomes a tagged MP3 in your library folder, ready for Rekordbox.",
-      action: ["Ready to Download", () => { emit("show-tab", "crates"); emit("select-view", "smart:to_download"); }],
+      actions: [["Ready to Download", () => { emit("show-tab", "crates"); emit("select-view", "smart:to_download"); }, true]],
     },
     {
-      done: !!s.rekordbox?.path, optional: true, title: "Connect Rekordbox",
-      text: "Optional: brings BPM, key and My Tags in, and sends your crates out as playlists.",
-      action: ["How", () => openDocsAt("faq-xml")],
+      done: !!s.rekordbox?.path || !!ob.skipped_rekordbox, title: "Connect Rekordbox",
+      text: "Brings Rekordbox's BPM, key and My Tags into DJ Crate, and can send your crates back as playlists.",
+      sub: [
+        "In Rekordbox, drag your library folder into Collection (that imports the MP3s).",
+        "Rekordbox: File → Export Collection in xml format. Save it anywhere, e.g. in your library folder.",
+        "DJ Crate: Settings → Rekordbox → pick that file. Export again whenever you change things in Rekordbox.",
+        "Optional: turn on Send crates & sets there to get your crates in Rekordbox as playlists.",
+      ],
+      actions: [
+        ["Open Settings", () => emit("show-tab", "settings"), true],
+        ["Step by step", () => openDocsAt("faq-xml")],
+        ["Skip, I don't use Rekordbox", () => post("/api/onboarding", { skipped_rekordbox: true }).then(() => emit("poll")).catch(errorToast)],
+      ],
     },
   ];
 }
 
 export function showOnboarding() {
-  forced = true;
   lastKey = "";
   post("/api/onboarding", { asked: true, dismissed: false }).then(() => emit("poll")).catch(errorToast);
 }
@@ -76,9 +84,8 @@ export function renderOnboarding(s) {
     return;
   }
   const list = ok ? steps(s) : [];
-  const required = list.filter((x) => !x.optional);
-  const allDone = required.length && required.every((x) => x.done);
-  const show = ok && (!s.onboarding?.dismissed) && (!allDone || forced);
+  const allDone = list.length && list.every((x) => x.done);
+  const show = ok && !s.onboarding?.dismissed;
   const key = JSON.stringify([show, list.map((x) => x.done)]);
   if (key === lastKey) return;
   lastKey = key;
@@ -87,24 +94,25 @@ export function renderOnboarding(s) {
     el = h("aside", { id: "onboarding", class: "onboarding" });
     document.body.append(el);
   }
-  const next = list.find((x) => !x.done && !x.optional);
+  const next = list.find((x) => !x.done);
   const hide = async () => {
-    forced = false;
     try { await post("/api/onboarding", { dismissed: true }); el.remove(); lastKey = ""; emit("poll"); } catch (e) { errorToast(e); }
   };
   el.replaceChildren(
     h("div", { class: "ob-head" },
       h("b", {}, allDone ? "You're set up" : "Getting started"),
-      h("span", { class: "muted small" }, `${required.filter((x) => x.done).length} of ${required.length}`),
+      h("span", { class: "muted small" }, `${list.filter((x) => x.done).length} of ${list.length}`),
       h("button", { class: "icon-btn small", title: "Hide (Settings → About → Setup guide brings it back)", onclick: hide }, "✕")),
     h("ol", { class: "ob-steps" }, list.map((x) => h("li", { class: `ob-step${x.done ? " done" : ""}${x === next ? " next" : ""}` },
       h("span", { class: "ob-check" }, x.done ? "✓" : ""),
       h("div", { class: "ob-body" },
-        h("div", { class: "ob-title" }, x.title, x.optional ? h("span", { class: "muted small" }, " · optional") : null),
-        x === next || (x.optional && !x.done && !next) ? h("div", { class: "muted small" }, x.text) : null,
-        (x === next || (x.optional && !x.done && !next)) && x.action
-          ? h("button", { class: `btn small${x === next ? " primary" : ""}`, onclick: x.action[1] }, x.action[0]) : null)))),
+        h("div", { class: "ob-title" }, x.title),
+        x === next ? h("div", { class: "muted small" }, x.text) : null,
+        x === next && x.sub ? h("ol", { class: "ob-sub small" }, x.sub.map((t) => h("li", {}, t))) : null,
+        x === next && x.actions ? h("div", { class: "ob-actions" }, x.actions.map(([label, fn, primary]) =>
+          h("button", { class: `btn small${primary ? " primary" : ""}`, onclick: fn }, label))) : null)))),
+    allDone ? h("p", { class: "small" }, "That's the whole loop: import, pick links, download, and Rekordbox. The Docs tab has everything else.") : null,
     h("div", { class: "ob-foot" },
       h("a", { href: "#", onclick: (e) => { e.preventDefault(); openDocsAt("start"); } }, "Full guide in Docs"),
-      allDone ? h("button", { class: "btn small", onclick: hide }, "Done") : null));
+      allDone ? h("button", { class: "btn small primary", onclick: hide }, "Done") : null));
 }

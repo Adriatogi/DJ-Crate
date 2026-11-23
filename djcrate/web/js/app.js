@@ -12,7 +12,7 @@ import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
 import { closePlayer, playerOpen, resetTable, togglePlayPause } from "./tracks.js";
-import { copyText, errorToast, fill, h, toast, toolOutput } from "./ui.js";
+import { copyText, errorToast, fill, h, modal, toast, toolOutput, updateSteps } from "./ui.js";
 
 let tab = "crates";
 let failures = 0;
@@ -264,8 +264,8 @@ function renderBanners(s) {
     b.push(h("div", { class: "banner info" }, `DJ Crate ${up.latest} is out (you have ${up.current}).`,
       up.install === "app"
         ? h("button", { class: "btn small primary", onclick: () => post("/api/open_url", { url: up.url }) }, "Download")
-        : h("span", {}, " Update with ", h("code", {}, "scripts/update.sh"), " ",
-          h("button", { class: "btn small", onclick: () => post("/api/open_url", { url: up.url }) }, "What's new")),
+        : h("button", { class: "btn small primary", onclick: () => modal({ title: `Update to DJ Crate ${up.latest}`, body: updateSteps(up, post), buttons: [
+          { label: "What's new", fn: () => { post("/api/open_url", { url: up.url }); return false; } }, { label: "Close", kind: "primary" }] }) }, "How to update"),
       dismiss));
   }
   if (s.queue.outdated) {

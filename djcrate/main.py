@@ -3,6 +3,7 @@
     uv run python -m djcrate.main            # native window
     uv run python -m djcrate.main --browser  # dev: open in your browser instead
     uv run python -m djcrate.main --fresh-start   # pretend it's a brand-new install (throwaway data)
+    uv run python -m djcrate.main --fake-update 9.9.9   # pretend a new version is out
 """
 
 import argparse
@@ -146,7 +147,11 @@ def main():
     parser.add_argument("--fresh-start", action="store_true",
                         help="pretend this is a brand-new install: throwaway settings and libraries in a temp folder "
                              "(your real libraries, settings and logins are untouched)")
+    parser.add_argument("--fake-update", metavar="VERSION",
+                        help="pretend DJ Crate VERSION is out (to see the update banner without a real release)")
     args = parser.parse_args()
+    if args.fake_update:
+        os.environ["DJCRATE_FAKE_UPDATE"] = args.fake_update
     if args.fresh_start and not os.environ.get("DJCRATE_FRESH"):
         fresh_start()
 

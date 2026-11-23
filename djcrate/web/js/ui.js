@@ -239,3 +239,15 @@ export function toolOutput(text, key = text) {
   el.addEventListener("toggle", () => { el.open ? openOutputs.add(key) : openOutputs.delete(key); });
   return el;
 }
+
+// How to update a copy that runs from the source code (git): the exact Terminal command, with Copy.
+export function updateSteps(u, post) {
+  const cmd = u.command || "~/DJ-Crate/scripts/update.sh";
+  return h("div", { class: "update-steps" },
+    h("ol", {},
+      h("li", {}, "Open Terminal ", h("button", { class: "btn small", onclick: () => post("/api/update/terminal") }, "Open Terminal")),
+      h("li", {}, "Paste this and press Return: ", h("code", {}, cmd), " ",
+        h("button", { class: "btn small", onclick: async () => { await copyText(cmd); toast("Copied. Paste it in Terminal."); } }, "Copy")),
+      h("li", {}, "When it says it's done, quit DJ Crate and open it again.")),
+    h("p", { class: "muted small" }, "It downloads the new version, and goes back to the one you had if anything fails. Your music and crates aren't touched."));
+}

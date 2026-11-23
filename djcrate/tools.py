@@ -189,5 +189,9 @@ def pick_path(kind: str = "file", extensions: tuple = ()) -> str | None:
     return out.stdout.strip().rstrip("\n") or None if out.returncode == 0 else None
 
 
+def open_app(name: str) -> None:
+    subprocess.run(["open", "-a", name], check=False)
+
+
 def open_url(url: str) -> None:
     subprocess.run(["open", url], check=False)

@@ -140,7 +140,7 @@ def test_bundle_detection_and_library_default(tmp_path, monkeypatch):
 def test_onboarding_progress_and_dismiss(client, lib):
     from djcrate import db
     ob = client.get("/api/status").json()["onboarding"]
-    assert ob == {"asked": False, "dismissed": False, "fresh": True, "playlists": 0, "linked": 0, "downloaded": 0}
+    assert ob == {"asked": False, "dismissed": False, "skipped_rekordbox": False, "fresh": True, "playlists": 0, "linked": 0, "downloaded": 0}
     # "No thanks" in the popup
     ob = client.post("/api/onboarding", json={"asked": True, "dismissed": True}).json()
     assert ob["asked"] and ob["dismissed"]
@@ -159,3 +159,21 @@ def test_library_already_in_use_is_not_asked(client, lib):
         conn.execute("INSERT INTO tracks (title, artists) VALUES ('a', 'b')")
     ob = client.get("/api/status").json()["onboarding"]
     assert ob["fresh"] is False and ob["asked"] is True and ob["dismissed"] is True
+
+
+def test_fake_update_shows_the_banner_without_github(monkeypatch):
+    monkeypatch.setenv("DJCRATE_FAKE_UPDATE", "9.9.9")
+    calls = []
+    out = updates.check(force=True, client=fake(body=release("v99.0.0"), calls=calls))
+    assert calls == [] and out["available"] and out["latest"] == "9.9.9"
+    monkeypatch.setenv("DJCRATE_FAKE_UPDATE", "0.0.1")
+    assert not updates.cached()["available"]
+
+
+def test_skip_rekordbox_step(client, lib):
+    assert client.post("/api/onboarding", json={"skipped_rekordbox": True}).json()["skipped_rekordbox"] is True
+
+
+def test_source_install_gets_the_exact_update_command(client, lib):
+    up = client.get("/api/status").json()["update"]
+    assert up["install"] == "git" and up["command"].endswith("scripts/update.sh")

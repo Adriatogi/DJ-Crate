@@ -29,6 +29,8 @@ If macOS asks for Keychain access (where your Spotify login is stored), click **
    2. Redirect URI: `http://127.0.0.1:8765/callback` (exactly; Settings has a copy button).
    3. Paste the app's **Client ID** into **Settings → Spotify**, then **Log in to Spotify**.
 
+**Why your own Spotify app?** Spotify only lets a hobby app's creator approve about 25 people by hand, and opening an app to everyone is only offered to registered companies with a large user base. So each DJ makes their own free app: it's just for you, takes about 2 minutes, and your login never leaves your Mac.
+
 > Spotify only lets apps read playlists **you own or collaborate on**, plus Liked Songs. For anyone else's, copy its songs into a new playlist of your own and import that.
 
 **Several people on one Mac:** each library is separate (music, crates, sets and Spotify login). Switch by clicking the library name in the top bar. Someone sharing your Spotify developer app must be added under **User Management** in your Spotify dashboard.
@@ -97,6 +99,7 @@ uv sync
 uv run python -m djcrate.main            # app window
 uv run python -m djcrate.main --browser  # in your browser (dev tools)
 uv run python -m djcrate.main --fresh-start  # like a brand-new install (throwaway temp data; quit DJ Crate first)
+uv run python -m djcrate.main --fake-update 9.9.9  # pretend a new version is out (see the update banner)
 uv run pytest
 ```
 

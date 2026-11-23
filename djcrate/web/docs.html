@@ -11,7 +11,7 @@
     <!-- ADRIAN: screenshot of the Open Anyway button in System Settings -->
   </li>
   <li><b>Create a library.</b> One folder for all your MP3s and DJ Crate's data (it's what Rekordbox imports). The app suggests <code>~/Music/DJ Crate</code>; an external drive works too.</li>
-  <li><b>Connect Spotify</b> (once, about 2 minutes, needs Spotify Premium). Settings → Spotify walks you through it: make a free app on Spotify's developer dashboard, add the redirect URI (there's a Copy button), paste its Client ID and log in. See <a href="#faq-spotify">the FAQ</a> if it complains.</li>
+  <li><b>Connect Spotify</b> (once, about 2 minutes, needs Spotify Premium). Settings → Spotify walks you through it: make a free app on Spotify's developer dashboard, add the redirect URI (there's a Copy button), paste its Client ID and log in. (<a href="#faq-spotify-why">why your own app?</a>) See <a href="#faq-spotify">the FAQ</a> if it complains.</li>
   <li><b>Import a playlist.</b> <b>+ Import Spotify playlist</b> turns it into a crate with every song's title, artists, cover and length.</li>
   <li><b>Pick the links.</b> In <b>Needs Link</b>, click <b>Find ▾</b> on a song: the green result matches Spotify's length and has no "live", "remix" or "sped up" warnings. Or click <b>Auto-fill links</b> to fill every song that has a sure match and leave the rest for you.</li>
   <li><b>Download.</b> <b>Ready to Download → Download All.</b> Each song becomes a tagged <code>Title - Artist.mp3</code> in your library folder.</li>
@@ -132,6 +132,14 @@
   <li><b>INVALID_CLIENT: Invalid redirect URI:</b> in your app on <code>developer.spotify.com/dashboard</code>, add exactly <code>http://127.0.0.1:8765/callback</code> (Settings → Spotify has a Copy button), save, and log in again.</li>
   <li><b>Not on this app's user list:</b> someone else's Spotify developer app is being used. In that dashboard, open the app → <b>User Management</b> and add your Spotify email, or make your own app.</li>
   <li>Spotify only lets apps read playlists <b>you own or collaborate on</b>, plus Liked Songs. For anyone else's, copy its songs into a new playlist of your own.</li>
+</ul>
+
+<h3 id="faq-spotify-why">Why do I have to make my own Spotify app?</h3>
+<p>DJ Crate reads your playlists through Spotify's official Web API, and every app using it needs a Client ID. A shared one would be easier, but Spotify only lets a hobby app's creator approve about 25 people by hand (by email), and opening an app to everyone is only offered to registered companies with a large user base. So each DJ makes their own free app instead.</p>
+<ul>
+  <li>It takes about 2 minutes, once (Settings → Spotify, or the Getting started guide).</li>
+  <li>It's just for you: your Client ID and login stay on your Mac (the login is in the macOS Keychain).</li>
+  <li>DJ Crate only <i>reads</i> playlists: names, artists, albums, lengths and covers. It never changes anything in your Spotify account.</li>
 </ul>
 
 <h3 id="faq-cookies">YouTube says "Sign in to confirm you're not a bot". What do cookies do?</h3>
