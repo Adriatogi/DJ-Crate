@@ -7,18 +7,18 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="icon" href="/icon.png">
 </head>
-<body>
+<body class="no-mytags">
   <header id="topbar">
     <div class="brand">DJ Crate</div>
     <nav class="tabs">
       <button class="tab active" data-tab="crates">Crates</button>
       <button class="tab" data-tab="cutting">Cutting</button>
       <button class="tab" data-tab="sets">Set Setter</button>
-      <button class="tab" data-tab="rack">Genre Rack</button>
       <button class="tab" data-tab="docs">Docs</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
     <div class="spacer"></div>
+    <div id="dl-progress" hidden></div>
     <div id="status-strip"></div>
     <button id="activity-btn" class="icon-btn" title="Activity">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
@@ -61,8 +61,14 @@
           </div>
           <div class="spacer"></div>
           <input id="search" type="search" placeholder="Search title, artist, album, notes…">
+          <button id="btn-mytags" class="btn mytags-only">My Tags ▾</button>
           <button id="btn-sort" class="btn" title="Sort">Sort ▾</button>
           <button id="btn-resync" class="btn" hidden>↻ Re-sync from Spotify</button>
+          <button id="btn-empty-trash" class="btn danger" hidden>Empty Trash…</button>
+          <button id="btn-trash-loose" class="btn" hidden title="Move every song here to the Trash. You can restore them from there.">Move all to Trash</button>
+          <button id="btn-swap-all" class="btn" hidden title="Swap every song here to its explicit version">Swap all to explicit</button>
+          <button id="btn-autofill" class="btn green" hidden>Auto-fill links</button>
+          <button id="btn-autofill-undo" class="btn" hidden title="Remove the links Auto-fill added to songs here that aren't downloaded yet. They go back to Needs Link.">Undo auto-fill</button>
           <button id="btn-download-all" class="btn primary">⬇ Download All</button>
           <button id="btn-view-menu" class="icon-btn" title="More">⋯</button>
         </div>
@@ -79,7 +85,7 @@
                 <th class="c-time sortable" data-sort="duration">Time</th>
                 <th class="c-bpm sortable" data-sort="bpm" title="From your Rekordbox export (Settings → Rekordbox)">BPM</th>
                 <th class="c-key sortable" data-sort="musical_key" title="Camelot · musical key, from your Rekordbox export">Key</th>
-                <th class="c-genre sortable" data-sort="genre" title="From your Genre Rack. Written into the MP3's Genre tag.">Genre</th>
+                <th class="c-mytags sortable" data-sort="mytags" title="Your My Tags from Rekordbox (read-only). They come from the Comments in your Rekordbox XML export. See Settings → Rekordbox.">My Tags</th>
                 <th class="c-link">YouTube link</th>
                 <th class="c-play"></th>
                 <th class="c-status sortable" data-sort="status">Status</th>
@@ -97,7 +103,6 @@
 
     <div id="view-cutting" class="view"></div>
     <div id="view-sets" class="view"></div>
-    <div id="view-rack" class="view"></div>
     <div id="view-docs" class="view"></div>
     <div id="view-settings" class="view"></div>
   </main>

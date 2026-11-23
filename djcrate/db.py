@@ -5,6 +5,7 @@ the download workers and the API can read/write at the same time.
 """
 
 import contextlib
+import json
 import logging
 import re
 import sqlite3
@@ -294,32 +295,159 @@ MIGRATIONS.append(  # v9: the Edited / Ready / Broken flags are gone
     """
 )
 
-MIGRATIONS.append(  # v10: remember which songs in a Spotify crate came from the playlist, so
-    # re-sync doesn't flag songs you added by hand as "Removed on Spotify". Older rows
-    # can't be told apart exactly: songs with a Spotify ID count as from the playlist,
-    # and the wrong flag is cleared from the rest.
+MIGRATIONS.append(  # v10: clean-version check (YouTube Music's explicit badge) for each song's link
     """
-    ALTER TABLE crate_tracks ADD COLUMN from_source INTEGER NOT NULL DEFAULT 0;
-    UPDATE crate_tracks SET from_source = 1
-     WHERE crate_id IN (SELECT id FROM crates WHERE spotify_playlist_id IS NOT NULL)
-       AND track_id IN (SELECT id FROM tracks WHERE spotify_id IS NOT NULL AND spotify_id != '');
-    UPDATE crate_tracks SET removed_from_source = 0 WHERE from_source = 0
+    ALTER TABLE tracks ADD COLUMN clean_url TEXT;
+    ALTER TABLE tracks ADD COLUMN clean_check TEXT;
+    ALTER TABLE tracks ADD COLUMN clean_checked_at REAL;
+    ALTER TABLE tracks ADD COLUMN clean_keep INTEGER NOT NULL DEFAULT 0
     """
 )
 
+MIGRATIONS.append(  # v11: Rekordbox My Tags (read-only), read from the Comments in a Rekordbox XML export
+    """
+    ALTER TABLE tracks ADD COLUMN rekordbox_mytags TEXT
+    """
+)
+
+MIGRATIONS.append(  # v12: Trash and Hidden. Songs already removed on Spotify and in no other crate go to the Trash.
+    """
+    ALTER TABLE tracks ADD COLUMN trashed_at REAL;
+    ALTER TABLE tracks ADD COLUMN trash_reason TEXT;
+    ALTER TABLE tracks ADD COLUMN hidden_at REAL;
+    UPDATE tracks SET trashed_at = CAST(strftime('%s', 'now') AS REAL),
+      trash_reason = (SELECT json_object('kind', 'spotify', 'crate', c.name, 'crate_id', c.id)
+                      FROM crate_tracks ct JOIN crates c ON c.id = ct.crate_id
+                      WHERE ct.track_id = tracks.id AND ct.removed_from_source = 1 LIMIT 1)
+    WHERE EXISTS (SELECT 1 FROM crate_tracks ct WHERE ct.track_id = tracks.id AND ct.removed_from_source = 1)
+      AND NOT EXISTS (SELECT 1 FROM crate_tracks ct JOIN crates c ON c.id = ct.crate_id
+                      WHERE ct.track_id = tracks.id AND ct.removed_from_source = 0 AND c.genre_id IS NULL)
+    """
+)
+
+MIGRATIONS.append(  # v13: the Genre Rack is gone for now: its genres, song genres, genre crates and suggestions are deleted.
+    # Genres already written into MP3 files are left alone.
+    """
+    DELETE FROM crates WHERE genre_id IS NOT NULL;
+    DROP TABLE track_genres;
+    DROP TABLE genre_aliases;
+    DROP TABLE genre_ignored;
+    DROP TABLE genre_suggest;
+    DROP TABLE mb_artist_genres;
+    ALTER TABLE crates DROP COLUMN genre_id;
+    DROP TABLE genres;
+    ALTER TABLE tracks DROP COLUMN rekordbox_genre;
+    ALTER TABLE tracks DROP COLUMN file_genre;
+    DELETE FROM settings WHERE key IN ('genre_lookup_on', 'mb_genre_list', 'mb_genre_list_at')
+    """
+)
+
+MIGRATIONS.append(  # v14: a download can be for a different link than the song's (swapping versions):
+    # the song only switches to that link, and its clean/explicit label, once the new file is in.
+    """
+    ALTER TABLE jobs ADD COLUMN url TEXT;
+    ALTER TABLE jobs ADD COLUMN on_done TEXT
+    """
+)
+
+# Repair for a fixed bug: swapping a downloaded song used to switch its link and clean/explicit label before
+# the new copy downloaded, so a failed download left the old file labelled as the other version. Those songs
+# (swapped, a file, and no download finished since the swap) go back to the link their file came from, and
+# their label is cleared so the background check labels them again. Failed jobs for them are dismissed.
+STALE_SWAP_SQL = """
+    json_extract(t.clean_check, '$.swapped_from') IS NOT NULL
+    AND t.download_status = 'done'
+    AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.track_id = t.id AND j.status = 'done'
+                    AND j.updated_at >= datetime(t.clean_checked_at, 'unixepoch'))
+"""
+
+
+def _repair_stale_swaps(conn) -> None:
+    ids = [r[0] for r in conn.execute("SELECT t.id FROM tracks t WHERE " + STALE_SWAP_SQL)]
+    for tid in ids:
+        conn.execute("UPDATE tracks SET source_url = json_extract(clean_check, '$.swapped_from'), clean_url = NULL, "
+                     "clean_check = NULL, clean_checked_at = NULL, updated_at = datetime('now') WHERE id = ?", (tid,))
+        conn.execute("UPDATE jobs SET status = 'dismissed' WHERE track_id = ? AND status = 'failed'", (tid,))
+    if ids:
+        log.info("Put %d swapped songs back to the link their file came from (their new copy never downloaded)", len(ids))
+
+
+MIGRATIONS.append(_repair_stale_swaps)  # v15
+
+
+def _from_source(conn) -> None:
+    """v16 (main's v10, merged in): remember which songs in a Spotify crate came from the playlist, so
+    re-sync doesn't flag songs you added by hand as "Removed on Spotify". Older rows can't be told apart
+    exactly: songs with a Spotify ID count as from the playlist, and the wrong flag is cleared from the rest.
+    Songs that went to the Trash only because of such a wrong flag come back out of it."""
+    if "from_source" in _columns(conn, "crate_tracks"):
+        return   # already done: this library came from a version that had it as v10
+    conn.execute("ALTER TABLE crate_tracks ADD COLUMN from_source INTEGER NOT NULL DEFAULT 0")
+    conn.execute("""UPDATE crate_tracks SET from_source = 1
+                    WHERE crate_id IN (SELECT id FROM crates WHERE spotify_playlist_id IS NOT NULL)
+                      AND track_id IN (SELECT id FROM tracks WHERE spotify_id IS NOT NULL AND spotify_id != '')""")
+    conn.execute("UPDATE crate_tracks SET removed_from_source = 0 WHERE from_source = 0")
+    conn.execute("""UPDATE tracks SET trashed_at = NULL, trash_reason = NULL
+                    WHERE trashed_at IS NOT NULL AND json_extract(trash_reason, '$.kind') = 'spotify'
+                      AND EXISTS (SELECT 1 FROM crate_tracks ct WHERE ct.track_id = tracks.id
+                                  AND ct.crate_id = json_extract(tracks.trash_reason, '$.crate_id') AND ct.removed_from_source = 0)""")
+
+
+MIGRATIONS.append(_from_source)  # v16
+
+MIGRATIONS.append(  # v17: keep what yt-dlp (or ffmpeg) actually said when a download fails, to show it
+    "ALTER TABLE jobs ADD COLUMN error_detail TEXT"
+)
+
+MIGRATIONS.append(  # v18: links filled by Auto-fill are marked until you download the song or edit the link
+    "ALTER TABLE tracks ADD COLUMN link_auto INTEGER NOT NULL DEFAULT 0"
+)
+
+
+def _columns(conn, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _effective_version(conn, version: int) -> int:
+    """Two lines of history both had a v10: this branch's (clean-version check) and main's (from_source,
+    now v16). A library at main's v10 has from_source but none of v10-v15 here, so it continues from v9."""
+    if version == 10 and "from_source" in _columns(conn, "crate_tracks") and "clean_url" not in _columns(conn, "tracks"):
+        return 9
+    return version
+
 SCHEMA_VERSION = len(MIGRATIONS)
+
+# The song's current link is the clean copy of a song YouTube Music also has as explicit.
+CLEAN_SQL = ("(t.clean_url IS NOT NULL AND t.clean_url = t.source_url "
+             "AND json_extract(t.clean_check, '$.result') = 'clean')")
 
 CHECK_VERSION_SQL = (
     "(t.download_status = 'done' AND t.duration_ms IS NOT NULL "
     f"AND t.file_duration_ms IS NOT NULL AND abs(t.file_duration_ms - t.duration_ms) > {LENGTH_TOLERANCE_MS})"
 )
 
+# Songs that show anywhere: not in the Trash and not hidden. Every view, count and export uses this.
+ACTIVE = "(t.trashed_at IS NULL AND t.hidden_at IS NULL)"
+
+# The two bins, listed after the smart crates (they are *not* filtered by ACTIVE).
+BINS: dict[str, tuple[str, str]] = {
+    "hidden": ("Hidden", "(t.hidden_at IS NOT NULL AND t.trashed_at IS NULL)"),
+    "trash": ("Trash", "t.trashed_at IS NOT NULL"),
+}
+
+# A swap to the other version whose download failed: the song still has its old file, and the new copy is owed.
+FAILED_SWAP_SQL = ("EXISTS (SELECT 1 FROM jobs j WHERE j.track_id = t.id AND j.status = 'failed' "
+                   "AND j.url IS NOT NULL AND j.url <> coalesce(t.source_url, ''))")
+
 SMART_CRATES: dict[str, tuple[str, str]] = {
     "all": ("All Tracks", "1"),
     "needs_link": ("Needs Link", "(coalesce(t.source_url, '') = '' AND t.download_status NOT IN ('done', 'missing'))"),
-    "to_download": ("Ready to Download", "(coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error'))"),
+    "to_download": ("Ready to Download", f"((coalesce(t.source_url, '') <> '' AND t.download_status IN ('none', 'error')) OR {FAILED_SWAP_SQL})"),
     "downloaded": ("Downloaded", "t.download_status = 'done'"),
     "check_version": ("Check Version", CHECK_VERSION_SQL),
+    "clean_versions": ("Clean Versions", CLEAN_SQL),
+    # Songs left loose, e.g. their crate was deleted before the Trash existed: review them, then trash or keep.
+    "no_crate": ("Not in a Crate", "NOT EXISTS (SELECT 1 FROM crate_tracks ct WHERE ct.track_id = t.id AND ct.removed_from_source = 0)"),
     "missing": ("Missing Files", "t.download_status = 'missing'"),
 }
 
@@ -358,7 +486,7 @@ def migrate(conn: sqlite3.Connection, backup_fn=None) -> None:
     `backup_fn(version)` is called before migrating an existing database, so a
     failed migration never leaves you without a copy.
     """
-    version = current_version(conn)
+    version = _effective_version(conn, current_version(conn))
     if version > SCHEMA_VERSION:
         raise RuntimeError(
             f"This library was created by a newer DJ Crate (schema v{version}, this app knows v{SCHEMA_VERSION}). Update the app."
@@ -489,6 +617,19 @@ def track_to_dict(row) -> dict:
     )
     if "removed_from_source" in d:
         d["removed_from_source"] = bool(d["removed_from_source"])
+    if "clean_check" in d:
+        raw = d.pop("clean_check")
+        current = bool(raw) and d.get("clean_url") and d.get("clean_url") == d.get("source_url")
+        d["clean"] = json.loads(raw) if current else None
+        d.pop("clean_keep", None)   # no longer used (labels are neutral, nothing to dismiss)
+        d["clean_flag"] = bool(d["clean"] and d["clean"].get("result") == "clean")
+    if "trashed_at" in d:
+        reason = d.pop("trash_reason", None)
+        d["trash"] = {**(json.loads(reason) if reason else {}), "at": d["trashed_at"]} if d["trashed_at"] else None
+        d["hidden"] = bool(d.get("hidden_at"))
+    if "rekordbox_mytags" in d:
+        raw = d.pop("rekordbox_mytags")
+        d["mytags"] = json.loads(raw) if raw else []   # read-only: they're edited in Rekordbox
     return d
 
 
@@ -496,10 +637,7 @@ def get_track(conn, track_id: int):
     row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
     if not row:
         return None
-    from . import genres
-    t = track_to_dict(row)
-    genres.attach(conn, [t])
-    return t
+    return track_to_dict(row)
 
 
 def add_to_crate(conn, crate_id: int, track_ids, from_source: bool = False) -> int:
@@ -515,6 +653,8 @@ def add_to_crate(conn, crate_id: int, track_ids, from_source: bool = False) -> i
         if cur.rowcount:
             pos += 1
             added += 1
+            # A song added to a crate is wanted again: it leaves the Trash.
+            conn.execute("UPDATE tracks SET trashed_at = NULL, trash_reason = NULL WHERE id = ? AND trashed_at IS NOT NULL", (tid,))
     return added
 
 

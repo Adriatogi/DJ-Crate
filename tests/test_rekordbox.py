@@ -73,7 +73,7 @@ def test_import_matches_paths_and_leaves_others(lib, tmp_path):
     write_xml(xml, [(lib.library / "Space Song.mp3", "93.50", "Am"), (lib.library / nfd, "128.00", "8B"),
                     (lib.library / "Zero.mp3", "0.00", "Fm"), ("/elsewhere/not-mine.mp3", "120", "Cm")])
     s = rekordbox.import_xml(conn, xml)
-    assert s == {"matched": 3, "total": 4, "in_xml": 4, "genres": 0}
+    assert s == {"matched": 3, "total": 4, "in_xml": 4, "mytags": 0}
     assert tuple(row(lib, a)) == (93.5, "8A") and tuple(row(lib, b)) == (128.0, "8B")
     assert tuple(row(lib, c)) == (99, "1A")  # not in the XML
     assert tuple(row(lib, d)) == (None, "4A")  # BPM 0.00 means unknown
@@ -138,9 +138,30 @@ def test_migration_from_v6_keeps_tracks(tmp_path, monkeypatch):
     conn.execute("INSERT INTO tracks (title) VALUES ('keep me')")
     db.migrate(conn)
     assert db.current_version(conn) == db.SCHEMA_VERSION
-    row = conn.execute("SELECT title, bpm, musical_key, rekordbox_genre, file_genre FROM tracks").fetchone()
-    assert tuple(row) == ("keep me", None, None, None, None)
-    assert conn.execute("SELECT count(*) FROM genres").fetchone()[0] == 0
+    row = conn.execute("SELECT title, bpm, musical_key FROM tracks").fetchone()
+    assert tuple(row) == ("keep me", None, None)
+
+
+def test_migration_removes_the_genre_rack(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:  # a library with genres, as v12 left it
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:12])
+        m.setattr(db, "SCHEMA_VERSION", 12)
+        db.migrate(conn)
+    conn.execute("INSERT INTO genres (id, name, norm) VALUES (1, 'House', 'house')")
+    conn.execute("INSERT INTO tracks (id, title, rekordbox_genre) VALUES (1, 'song', 'House')")
+    conn.execute("INSERT INTO track_genres (track_id, genre_id) VALUES (1, 1)")
+    conn.execute("INSERT INTO crates (id, name, kind, position, genre_id) VALUES (1, 'House', 'crate', 0, 1), (2, 'Mine', 'crate', 1, NULL)")
+    conn.execute("INSERT INTO crate_tracks (crate_id, track_id, position) VALUES (1, 1, 0), (2, 1, 0)")
+    db.set_setting(conn, "genre_lookup_on", "0")
+    db.migrate(conn)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert not tables & {"genres", "track_genres", "genre_aliases", "genre_ignored", "genre_suggest", "mb_artist_genres"}
+    assert [r[0] for r in conn.execute("SELECT name FROM crates")] == ["Mine"]       # the genre crate is gone, the song stays
+    assert conn.execute("SELECT title FROM tracks").fetchone()[0] == "song"
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")} | {r[1] for r in conn.execute("PRAGMA table_info(crates)")}
+    assert not cols & {"rekordbox_genre", "file_genre", "genre_id"}
+    assert db.get_setting(conn, "genre_lookup_on") is None
 
 
 # ------------------------------------------------------------ export
@@ -233,7 +254,82 @@ def test_pick_endpoint_uses_finder_picker(client, monkeypatch):
     assert seen == {"kind": "file", "ext": ("xml",)}
 
 
-def test_migration_v10_clears_wrong_removed_flags_on_hand_added_songs(tmp_path, monkeypatch):
+# ---------------------------------------------------------------- My Tags (read-only, from Comments)
+
+def test_parse_mytags():
+    assert rekordbox.parse_mytags("/* Hype / Vocal */ great opener") == ["Hype", "Vocal"]
+    assert rekordbox.parse_mytags("/*Hype/Vocal*/") == ["Hype", "Vocal"]
+    assert rekordbox.parse_mytags("note before /* Peak  Time */") == ["Peak Time"]
+    assert rekordbox.parse_mytags("/* A / B */ and /* b / C */") == ["A", "B", "C"]
+    assert rekordbox.parse_mytags("/* A /  / A */") == ["A"]
+    for none in (None, "", "just a comment", "/* */"):
+        assert rekordbox.parse_mytags(none) == []
+
+
+def write_tag_xml(path, tracks):
+    """tracks: [(location, comments or None)]"""
+    from xml.sax.saxutils import quoteattr
+    body = "".join(
+        f'<TRACK TrackID="{i}" Name="n" Location="{rekordbox.path_to_location(loc)}"'
+        + (f" Comments={quoteattr(c)}" if c is not None else "") + "/>"
+        for i, (loc, c) in enumerate(tracks, 1))
+    Path(path).write_text(f'<?xml version="1.0"?><DJ_PLAYLISTS><COLLECTION>{body}</COLLECTION></DJ_PLAYLISTS>', encoding="utf-8")
+
+
+def tags_of(lib, tid):
+    conn = lib.conn()
+    try:
+        return conn.execute("SELECT rekordbox_mytags FROM tracks WHERE id = ?", (tid,)).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_import_mytags_and_clear_on_reimport(lib, tmp_path):
+    a = add_song(lib, "Tagged")
+    b = add_song(lib, "Plain")
+    c = add_song(lib, "Not In Xml")
+    xml = tmp_path / "rb.xml"
+    write_tag_xml(xml, [(lib.library / "Tagged.mp3", "/* Hype / Vocal */ opener"), (lib.library / "Plain.mp3", None)])
+    s = rekordbox.import_xml(lib.conn(), xml)
+    assert s["mytags"] == 1
+    assert json.loads(tags_of(lib, a)) == ["Hype", "Vocal"]
+    assert json.loads(tags_of(lib, b)) == []
+    assert tags_of(lib, c) is None
+    write_tag_xml(xml, [(lib.library / "Tagged.mp3", "opener")])  # tags removed in Rekordbox
+    rekordbox.import_xml(lib.conn(), xml)
+    assert json.loads(tags_of(lib, a)) == []
+
+
+def test_mytags_api_filter_search_and_list(client, lib, tmp_path):
+    a = add_song(lib, "One")
+    b = add_song(lib, "Two")
+    add_song(lib, "Three")
+    xml = tmp_path / "rb.xml"
+    write_tag_xml(xml, [(lib.library / "One.mp3", "/* Hype / Vocal */"), (lib.library / "Two.mp3", "/* Hyped / vocal */")])
+    client.put("/api/rekordbox/xml", json={"path": str(xml)})
+    ids = lambda r: {t["id"] for t in r.json()["tracks"]}
+    assert ids(client.get("/api/tracks?mytag=hype")) == {a}          # exact, any case: not "Hyped"
+    assert ids(client.get("/api/tracks?mytag=Vocal")) == {a, b}
+    assert ids(client.get("/api/tracks?q=hyped")) == {b}             # search finds tags too
+    one = next(t for t in client.get("/api/tracks").json()["tracks"] if t["id"] == a)
+    assert one["mytags"] == ["Hype", "Vocal"] and "rekordbox_mytags" not in one
+    tags = client.get("/api/mytags").json()["tags"]
+    assert [(t["name"].lower(), t["songs"]) for t in tags] == [("hype", 1), ("hyped", 1), ("vocal", 2)]
+    assert client.get("/api/status").json()["rekordbox"]["mytags"] == 2
+
+
+def test_export_never_sends_comments_or_mytags(lib, tmp_path):
+    a = add_song(lib, "Song", notes="my note")
+    conn = lib.conn()
+    conn.execute("UPDATE tracks SET rekordbox_mytags = ? WHERE id = ?", (json.dumps(["Hype"]), a))
+    data, _ = rekordbox.build_export(lib, conn)
+    root = ET.fromstring(data)
+    for el in root.iter("TRACK"):
+        assert "Comments" not in el.attrib
+    assert b"Hype" not in data
+
+
+def test_migration_from_source_clears_wrong_removed_flags_on_hand_added_songs(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "x.db")
     with monkeypatch.context() as m:
         m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:9])
@@ -245,3 +341,22 @@ def test_migration_v10_clears_wrong_removed_flags_on_hand_added_songs(tmp_path, 
     db.migrate(conn)
     rows = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT track_id, removed_from_source, from_source FROM crate_tracks")}
     assert rows == {1: (1, 1), 2: (0, 0)}
+    # The hand-added song had been sent to the Trash because of the wrong flag: it comes back. The other stays.
+    trashed = {r[0] for r in conn.execute("SELECT id FROM tracks WHERE trashed_at IS NOT NULL")}
+    assert trashed == {1}
+
+
+def test_library_from_mains_v10_upgrades_cleanly(tmp_path, monkeypatch):
+    """main had from_source as its v10; a library at that version still gets every migration here."""
+    conn = db.connect(tmp_path / "x.db")
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:9])
+        m.setattr(db, "SCHEMA_VERSION", 9)
+        db.migrate(conn)
+    for stmt in ("ALTER TABLE crate_tracks ADD COLUMN from_source INTEGER NOT NULL DEFAULT 0",
+                 "DELETE FROM schema_version", "INSERT INTO schema_version (version) VALUES (10)"):
+        conn.execute(stmt)
+    db.migrate(conn)
+    assert db.current_version(conn) == db.SCHEMA_VERSION
+    assert {"clean_url", "rekordbox_mytags", "trashed_at", "hidden_at"} <= db._columns(conn, "tracks")
+    assert "from_source" in db._columns(conn, "crate_tracks") and "url" in db._columns(conn, "jobs")

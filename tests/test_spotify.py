@@ -118,10 +118,17 @@ def test_import_and_resync_through_api(client, lib, monkeypatch):
     # Song 0 removed on Spotify, Song 3 added
     payload["tracks"] = songs[1:] + [{"spotify_id": "s3", "title": "Song 3", "artists": "A"}]
     r = client.post(f"/api/crates/{crate}/resync").json()
-    assert (r["added"], r["removed"]) == (1, 1)
+    assert (r["added"], r["removed"], r["trashed"]) == (1, 1, 1)
     tracks = client.get(f"/api/tracks?view=crate:{crate}").json()["tracks"]
-    gone = [t for t in tracks if t["removed_from_source"]]
-    assert len(tracks) == 4 and gone[0]["notes"] == "keep me" and gone[0]["source_url"] == "https://youtu.be/x"
+    assert len(tracks) == 3 and first["id"] not in {t["id"] for t in tracks}   # removed on Spotify: out of the crate...
+    binned = client.get("/api/tracks?view=smart:trash").json()["tracks"]      # ...and into the Trash, notes and link kept
+    assert [t["id"] for t in binned] == [first["id"]] and binned[0]["notes"] == "keep me" and binned[0]["source_url"] == "https://youtu.be/x"
+    assert binned[0]["trash"]["kind"] == "spotify" and binned[0]["trash"]["crate"] == "Gig"
+    # Back on the playlist: out of the Trash and back in the crate
+    payload["tracks"] = songs + [{"spotify_id": "s3", "title": "Song 3", "artists": "A"}]
+    r = client.post(f"/api/crates/{crate}/resync").json()
+    assert r["restored"] == 1 and not client.get("/api/tracks?view=smart:trash").json()["tracks"]
+    assert len(client.get(f"/api/tracks?view=crate:{crate}").json()["tracks"]) == 4
     # Importing the same playlist again re-syncs instead of duplicating
     again = client.post("/api/spotify/import", json={"ref": "cccccccccccccccccccccc"}).json()
     assert again["already_imported"] and again["added"] == 0

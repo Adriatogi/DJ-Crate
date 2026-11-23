@@ -1,18 +1,19 @@
 // Crates tab controller: which view is selected, toolbar, loading data.
 
+import { swapOwed, swapVersion } from "./cleanver.js";
 import { get, post } from "./api.js";
 import { autoRelocate, initImporters } from "./importers.js";
 import { closeDetail, initDetail } from "./detail.js";
 import { crateMenu, deleteCrate, initSidebar, renderSidebar } from "./sidebar.js";
 import { emit, findCrate, on, store } from "./store.js";
-import { initTracks, renderTracks, resetTable } from "./tracks.js";
-import { debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
+import { deleteForGood, initTracks, moveToTrash, renderTracks, resetTable } from "./tracks.js";
+import { confirmDialog, debounce, errorToast, keyOrder, menu, toast } from "./ui.js";
 
 let loadSeq = 0;
 
 const SORTS = {
-  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key", genre: "Genre",
-  added: "Date added", status: "Status",
+  default: "Default order", title: "Title", artists: "Artist", album: "Album", duration: "Length", bpm: "BPM", musical_key: "Key",
+  mytags: "My Tags", added: "Date added", status: "Status",
 };
 const STATUS_ORDER = { none: 1, queued: 2, downloading: 3, error: 4, missing: 5, done: 6 };
 store.sort = JSON.parse(localStorage.getItem("djc.sort") || '{"key":"default","dir":1}');
@@ -22,7 +23,7 @@ function sortValue(t, key) {
     case "duration": return t.duration_ms ?? t.file_duration_ms ?? 0;
     case "bpm": return t.bpm ?? 0;
     case "musical_key": return keyOrder(t.musical_key);
-    case "genre": return t.genre_tag ? t.genre_tag.toLowerCase() : "\uffff"; // songs without a genre last
+    case "mytags": return t.mytags?.length ? t.mytags.join(" / ").toLowerCase() : "\uffff";
     case "added": return t.created_at || "";
     case "status": return t.download_status === "none" && !t.source_url ? 0 : STATUS_ORDER[t.download_status] ?? 9;
     default: return (t[key] || "").toLowerCase();
@@ -88,8 +89,8 @@ export async function refreshTracks() {
   const seq = ++loadSeq;
   const q = document.getElementById("search").value;
   try {
-    const rack = store.view.startsWith("genre:") ? `&sub=${store.rack.sub ? 1 : 0}&artist=${encodeURIComponent(store.rack.artist)}` : "";
-    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${rack}`);
+    const tag = store.mytag ? `&mytag=${encodeURIComponent(store.mytag)}` : "";
+    const r = await get(`/api/tracks?view=${encodeURIComponent(store.view)}&q=${encodeURIComponent(q)}${tag}`);
     if (seq !== loadSeq) return; // a newer request won
     r.tracks.forEach((t, i) => { t._order = i; });
     store.tracks = r.tracks;
@@ -106,7 +107,7 @@ export async function refreshTracks() {
 export function selectView(view) {
   if (view !== store.view) {
     store.view = view;
-    if (!view.startsWith("genre:")) localStorage.setItem("djc.view", view); // Genre Rack views aren't remembered here
+    localStorage.setItem("djc.view", view);
     resetTable();
     closeDetail();
     store.tracks = [];
@@ -122,10 +123,35 @@ function viewInfo() {
     const c = findCrate(Number(v.split(":")[1]));
     return { name: c?.name || "…", crate: c };
   }
-  if (v.startsWith("genre:")) return { name: store.rack.name || "Genre", crate: null };
   const key = v.split(":")[1];
-  const s = store.sidebar?.smart.find((x) => x.key === key);
+  const s = [...(store.sidebar?.smart || []), ...(store.sidebar?.bins || [])].find((x) => x.key === key);
   return { name: s?.name || "All Tracks", crate: null };
+}
+
+// ---- My Tags filter (Rekordbox My Tags, read-only). Stays on while you switch views.
+function setMytag(tag) {
+  store.mytag = tag || null;
+  resetTable();
+  renderMytagButton();
+  refreshTracks();
+}
+
+function renderMytagButton() {
+  const btn = document.getElementById("btn-mytags");
+  btn.textContent = store.mytag ? `My Tag: ${store.mytag} ✕` : "My Tags ▾";
+  btn.classList.toggle("active", !!store.mytag);
+  btn.title = store.mytag ? "Showing only songs with this Rekordbox My Tag. Click to show all songs." : "Show only songs with one of your Rekordbox My Tags";
+}
+
+async function mytagMenu(anchor) {
+  if (store.mytag) return setMytag(null);
+  try {
+    const { tags } = await get("/api/mytags");
+    menu(anchor, tags.length
+      ? [{ label: "Rekordbox My Tags (read-only)", header: true },
+        ...tags.map((t) => ({ label: `${t.name}  ·  ${t.songs}`, fn: () => setMytag(t.name) }))]
+      : [{ label: "No My Tags found. See Settings → Rekordbox.", header: true }], { align: "right" });
+  } catch (e) { errorToast(e); }
 }
 
 function renderToolbar() {
@@ -138,10 +164,96 @@ function renderToolbar() {
   if (crate?.kind === "spotify" && crate.spotify_playlist_id === "liked") meta.push("Liked Songs");
   document.getElementById("view-meta").textContent = meta.join(" · ");
   document.getElementById("btn-resync").hidden = crate?.kind !== "spotify";
-  const toDownload = ts.filter((t) => t.source_url && ["none", "error"].includes(t.download_status)).length;
+  const flagged = store.view === "smart:clean_versions" ? ts.filter((t) => t.clean_flag) : [];
+  const swapAll = document.getElementById("btn-swap-all");
+  swapAll.hidden = !flagged.length;
+  swapAll.textContent = `Swap all to explicit (${flagged.length})`;
+  const toDownload = ts.filter((t) => (t.source_url && ["none", "error"].includes(t.download_status)) || swapOwed(t)).length;
+  renderAutofill();
+  const inTrash = store.view === "smart:trash";
+  const empty = document.getElementById("btn-empty-trash");
+  empty.hidden = !inTrash || !ts.length;
+  const loose = document.getElementById("btn-trash-loose");
+  loose.hidden = store.view !== "smart:no_crate" || !ts.length;
+  loose.textContent = `Move all ${ts.length} to Trash`;
   const dl = document.getElementById("btn-download-all");
+  dl.hidden = inTrash || store.view === "smart:hidden";
   dl.textContent = toDownload ? `⬇ Download All (${toDownload})` : "⬇ Download All";
   dl.title = toDownload ? "Download every song here that has a link and isn't downloaded yet" : "Nothing here has a link waiting to download";
+}
+
+// ---- Auto-fill links: the top fully green Find result for each song here that needs a link.
+const needsLink = (t) => !t.source_url && !["done", "missing"].includes(t.download_status);
+
+function renderAutofill() {
+  const undo = document.getElementById("btn-autofill-undo");
+  const autos = store.tracks.filter((t) => t.link_auto && ["none", "error"].includes(t.download_status)).length;
+  undo.hidden = !autos || ["smart:trash", "smart:hidden"].includes(store.view);
+  undo.textContent = `Undo auto-fill (${autos})`;
+  const btn = document.getElementById("btn-autofill");
+  const af = store.status?.autofill;
+  const bin = ["smart:trash", "smart:hidden"].includes(store.view);
+  if (af?.running) {
+    btn.hidden = false;
+    btn.textContent = `Auto-filling ${af.done}/${af.total}${af.filled ? ` · ${af.filled} filled` : ""}${af.paused_until ? " · paused (YouTube is busy)" : ""} · Stop`;
+    btn.title = "Click to stop. Links already filled stay.";
+    return;
+  }
+  const n = bin ? 0 : store.tracks.filter(needsLink).length;
+  btn.hidden = !n;
+  btn.textContent = `Auto-fill links (${n})`;
+  btn.title = "For each song here without a link, use the top YouTube result whose length matches Spotify's and has no version warnings " +
+    "(Remix, Live, Sped up, Clean…). Songs without one stay for you to pick. Nothing downloads until you click Download All.";
+}
+
+async function autofillClick() {
+  try {
+    if (store.status?.autofill?.running) {
+      await post("/api/autofill/stop");
+      toast("Auto-fill stopped. Links it already filled stay.");
+    } else {
+      const r = await post("/api/autofill", { view: store.view });
+      if (store.status) store.status.autofill = r;
+      toast(`Auto-filling links for ${r.total} song${r.total === 1 ? "" : "s"}. Songs without a clear match stay for you.`, { type: "info" });
+    }
+    emit("poll");
+    renderAutofill();
+  } catch (e) { errorToast(e); }
+}
+
+async function undoAutofill() {
+  const n = store.tracks.filter((t) => t.link_auto && ["none", "error"].includes(t.download_status)).length;
+  const ok = await confirmDialog(`Undo auto-fill for ${n} song${n === 1 ? "" : "s"}?`,
+    "The links Auto-fill added to the songs here (the ones marked Auto that aren't downloaded yet) are removed, " +
+    "and those songs go back to Needs Link. Links you set yourself and downloaded songs aren't touched.", { ok: "Undo auto-fill" });
+  if (!ok) return;
+  try {
+    const r = await post("/api/autofill/undo", { view: store.view });
+    toast(`Removed ${r.undone} auto-filled link${r.undone === 1 ? "" : "s"}. Those songs are back in Needs Link.`);
+    refreshTracks();
+    refreshSidebar();
+  } catch (e) { errorToast(e); }
+}
+
+// Called on every status poll: refresh the list as links come in, and sum up when a run ends.
+let lastFilled = null, lastFinished;
+export function autofillProgress(af) {
+  if (lastFinished === undefined) lastFinished = af?.finished_at ?? null;   // don't replay an old run after a reload
+  if (af && af.filled !== lastFilled) {
+    lastFilled = af.filled;
+    refreshTracks();
+    refreshSidebar();
+  }
+  if (af && !af.running && af.finished_at && af.finished_at !== lastFinished) {
+    lastFinished = af.finished_at;
+    const left = af.unsure + af.failed;
+    toast(af.stopped ? `Auto-fill stopped: filled ${af.filled} link${af.filled === 1 ? "" : "s"}.`
+      : `Auto-fill done: filled ${af.filled} link${af.filled === 1 ? "" : "s"}.` +
+        (left ? ` ${left} song${left === 1 ? "" : "s"} had no clear match and still need${left === 1 ? "s" : ""} you.` : "") +
+        (af.filled ? " Hit Download All when you're ready." : ""),
+    { type: "success", timeout: 10000 });
+  }
+  renderAutofill();
 }
 
 async function downloadAll() {
@@ -187,7 +299,27 @@ export function initCrates() {
   document.getElementById("btn-add-manual").onclick = () => emit("add-manual");
   document.getElementById("btn-import-folder").onclick = () => emit("import-folder");
   document.getElementById("btn-download-all").onclick = downloadAll;
+  document.getElementById("btn-autofill").onclick = autofillClick;
+  document.getElementById("btn-autofill-undo").onclick = undoAutofill;
   document.getElementById("btn-resync").onclick = () => emit("resync", Number(store.view.split(":")[1]));
+  const tagBtn = document.getElementById("btn-mytags");
+  tagBtn.onclick = () => mytagMenu(tagBtn);
+  on("filter-mytag", setMytag);
+  renderMytagButton();
+  // Empty Trash works on everything in the Trash, so clear the search first to show them all.
+  document.getElementById("btn-empty-trash").onclick = async () => {
+    const search = document.getElementById("search");
+    if (search.value || store.mytag) { search.value = ""; store.mytag = null; renderMytagButton(); await refreshTracks(); }
+    deleteForGood([], { all: true });
+  };
+  document.getElementById("btn-trash-loose").onclick = async () => {
+    const ids = store.tracks.map((t) => t.id);
+    const ok = await confirmDialog(`Move ${ids.length} song${ids.length === 1 ? "" : "s"} to the Trash?`,
+      "These songs aren't in any crate. They'll leave All Tracks and every count; restore any of them from the Trash. Nothing is deleted until you empty the Trash.",
+      { ok: "Move to Trash" });
+    if (ok) moveToTrash(ids);
+  };
+  document.getElementById("btn-swap-all").onclick = () => swapVersion(store.tracks.filter((t) => t.clean_flag), "explicit");
   const more = document.getElementById("btn-view-menu");
   more.onclick = () => viewMenu(more);
   const sortBtn = document.getElementById("btn-sort");

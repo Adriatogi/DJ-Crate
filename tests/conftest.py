@@ -70,3 +70,17 @@ def make_mp3(tmp_path):
         return path
 
     return make
+
+
+@pytest.fixture(autouse=True)
+def no_youtube_music(monkeypatch):
+    """Tests never talk to YouTube Music; tests that need answers fake Client.post."""
+    from djcrate import ytmusic
+
+    def offline(self, endpoint, body):
+        raise ytmusic.YTMError("offline in tests")
+    monkeypatch.setattr(ytmusic.Client, "post", offline)
+    monkeypatch.setattr(ytmusic, "GAP_S", 0)
+    ytmusic._search_cache.clear()
+    ytmusic._client = None
+    ytmusic._interactive = None

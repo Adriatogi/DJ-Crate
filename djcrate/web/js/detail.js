@@ -1,13 +1,13 @@
-// The song card: edit metadata, genres, notes (kept in DJ Crate), flags and
+// The song card: edit metadata, notes (kept in DJ Crate), flags and
 // samples. One card for the whole app: the Crates side panel, and Cutting's
 // right panel (via songCard).
 
 import { patch, post } from "./api.js";
-import { genreControl } from "./genrepicker.js";
+import { cleanSection } from "./cleanver.js";
 import { samplesSection } from "./samples.js";
 import { emit, on, store } from "./store.js";
-import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast } from "./ui.js";
-import { relocateTrack, updateTrack } from "./tracks.js";
+import { errorToast, fill, fmtBpm, fmtDiff, fmtKey, fmtMs, h, toast, toolOutput } from "./ui.js";
+import { mytagChips, relocateTrack, trashWhy, updateTrack } from "./tracks.js";
 
 function current() {
   return store.tracks.find((t) => t.id === store.detailId) || null;
@@ -72,9 +72,10 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
         h("div", { class: "muted" }, t.artists),
         t.spotify_url ? h("a", { href: "#", class: "small", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.spotify_url }); } }, "Open in Spotify ↗") : null,
         extra)),
-    h("div", { class: "field" }, h("label", {}, "Genre"), genreControl(t, { onSaved, max: 6 }),
-      t.genres.length ? h("div", { class: "muted small", style: { marginTop: "4px" } },
-        `Written into the MP3 as “${t.genre_tag}”. In Rekordbox: right-click the song → Reload Tag.`) : null),
+    binBanner(t),
+    t.mytags?.length ? h("div", { class: "field" }, h("label", {}, "My Tags (from Rekordbox)"), mytagChips(t, { all: true }),
+      h("div", { class: "muted small", style: { marginTop: "4px" } }, "Read-only. Edit them in Rekordbox, then export the XML again.")) : null,
+    cleanSection(t),
     field("Notes", "notes", { multiline: true, placeholder: "Anything about this song — drop at 1:04, vocal comes in late, pairs well with…" }),
     samplesSection(t, { openSong, openTitle, onChange: onSamplesChange }),
     h("div", { class: "section-title" }, "Metadata"),
@@ -95,12 +96,14 @@ export function songCard(t, { onClose = null, extra = null, openSong, openTitle,
       t.source_url ? [h("div", { class: "k" }, "Link"), h("div", { class: "v" },
         h("a", { href: "#", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url: t.source_url }); } }, t.source_url))] : null),
     t.error_msg && t.download_status === "error" ? h("div", { class: "banner bad", style: { borderRadius: "6px", margin: "6px 0" } }, t.error_msg) : null,
+    t.job_status === "failed" && t.job_detail ? toolOutput(t.job_detail, `job:${t.job_id}`) : null,
     t.tag_error ? h("div", { class: "banner warn", style: { borderRadius: "6px", margin: "6px 0" } }, t.tag_error) : null,
     h("div", { class: "row gap", style: { flexWrap: "wrap", marginTop: "8px" } },
       t.file_rel_path && t.download_status !== "missing"
         ? h("button", { class: "btn small", onclick: () => post("/api/reveal", { track_id: t.id }).catch(errorToast) }, "Show in Finder") : null,
       t.file_rel_path ? h("button", { class: "btn small", onclick: () => relocateTrack(t) }, "Relocate…") : null,
       hasFile ? h("button", { class: "btn small", onclick: retag }, t.tag_error ? "Retry tags" : "Rewrite tags") : null),
+    binActions(t),
   ];
 }
 
@@ -139,4 +142,44 @@ export function initDetail() {
   on("open-detail", openDetail);
   on("track-updated", (t) => { if (t && t.id === store.detailId) render(); });
   on("tracks-loaded", () => { if (store.detailId) render(); });
+}
+
+// In the Trash or hidden: say so, with the way back.
+function binBanner(t) {
+  if (!t.trash && !t.hidden) return null;
+  const back = async () => {
+    try {
+      if (t.trash) await post("/api/tracks/restore", { ids: [t.id] });
+      else await post("/api/tracks/hide", { ids: [t.id], hidden: false });
+      emit("refresh-tracks");
+      emit("refresh-sidebar");
+      closeDetail();
+      toast(t.trash ? "Restored." : "Unhidden.", { type: "success" });
+    } catch (e) { errorToast(e); }
+  };
+  return h("div", { class: "bin-banner" },
+    h("div", {}, t.trash ? `In the Trash: ${trashWhy(t.trash)}.` : "Hidden. It doesn't show in any list but this one."),
+    h("button", { class: "btn small", onclick: back }, t.trash ? "Restore" : "Unhide"));
+}
+
+// Hide / Move to Trash, for a song that's in neither (the banner at the top handles the way back).
+function binActions(t) {
+  if (t.trash || t.hidden) return null;
+  const act = async (url, body, msg, undo) => {
+    try {
+      await post(url, body);
+      emit("refresh-tracks");
+      emit("refresh-sidebar");
+      closeDetail();
+      toast(msg, { timeout: 8000, action: { label: "Undo", fn: async () => { await post(...undo); emit("refresh-tracks"); emit("refresh-sidebar"); } } });
+    } catch (e) { errorToast(e); }
+  };
+  return [
+    h("div", { class: "section-title" }, "Remove"),
+    h("div", { class: "row gap", style: { flexWrap: "wrap" } },
+      h("button", { class: "btn small", title: "Hide from every list. Nothing is deleted; find it under Hidden.",
+        onclick: () => act("/api/tracks/hide", { ids: [t.id], hidden: true }, `Hid “${t.title}”. It's under Hidden.`, ["/api/tracks/hide", { ids: [t.id], hidden: false }]) }, "Hide"),
+      h("button", { class: "btn small danger", title: "Move to the Trash. Restore it from there any time until you empty the Trash.",
+        onclick: () => act("/api/tracks/trash", { ids: [t.id] }, `Moved “${t.title}” to the Trash.`, ["/api/tracks/restore", { ids: [t.id] }]) }, "Move to Trash")),
+  ];
 }

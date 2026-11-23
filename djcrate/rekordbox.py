@@ -1,7 +1,8 @@
 """Talking to Rekordbox through its official XML files, never its database.
 
 Two files, one per direction:
-  * `rekordbox.xml`, exported by Rekordbox: DJ Crate reads BPM and key from it.
+  * `rekordbox.xml`, exported by Rekordbox: DJ Crate reads BPM, key and
+    My Tags from it (My Tags only if Rekordbox is set to add them to Comments).
   * `DJ Crate for Rekordbox.xml`, written by DJ Crate: crates and sets as
     playlists. Rekordbox matches songs by
     file path, so nothing is duplicated. BPM, key, grids and cues are never sent.
@@ -82,8 +83,24 @@ def _norm(path) -> str:
 
 # ---------------------------------------------------------------- Rekordbox -> DJ Crate
 
+_MYTAG_BLOCK = re.compile(r"/\*(.*?)\*/", re.S)
+
+
+def parse_mytags(comments: str | None) -> list[str]:
+    """My Tags from a Comments field. Rekordbox (when set to add My Tags to Comments)
+    writes them as `/* Hype / Vocal */`. Read-only: DJ Crate never writes Comments."""
+    out, seen = [], set()
+    for block in _MYTAG_BLOCK.findall(comments or ""):
+        for part in block.split("/"):
+            tag = " ".join(part.split())
+            if tag and tag.casefold() not in seen:
+                seen.add(tag.casefold())
+                out.append(tag)
+    return out
+
+
 def parse(path):
-    """Yield (absolute path, bpm or None, camelot or None, genre) for each collection track."""
+    """Yield (absolute path, bpm or None, camelot or None, my tags) for each collection track."""
     for _, el in ET.iterparse(str(path), events=("end",)):
         if el.tag != "TRACK":
             continue
@@ -94,7 +111,7 @@ def parse(path):
                     bpm = float(el.get("AverageBpm") or 0) or None
                 except ValueError:
                     bpm = None
-                yield p, bpm, to_camelot(el.get("Tonality")), (el.get("Genre") or "").strip()
+                yield p, bpm, to_camelot(el.get("Tonality")), parse_mytags(el.get("Comments"))
         el.clear()
 
 
@@ -103,12 +120,12 @@ def _read_xml(path) -> list[tuple]:
 
 
 def import_xml(conn, xml_path) -> dict:
-    """Copy BPM and key onto the matching library tracks. Songs not in the XML keep theirs."""
+    """Copy BPM, key and My Tags onto the matching library tracks. Songs not in the XML keep theirs."""
     entries = _read_xml(xml_path)
-    by_path = {_norm(p): (bpm, key, genre) for p, bpm, key, genre in entries}
-    tails = [(_norm(p), (bpm, key, genre)) for p, bpm, key, genre in entries]
+    by_path = {_norm(p): rest for p, *rest in entries}
+    tails = [(_norm(p), rest) for p, *rest in entries]
     rows = conn.execute("SELECT id, file_rel_path FROM tracks WHERE file_rel_path IS NOT NULL AND file_rel_path <> ''").fetchall()
-    matched = genres_seen = 0
+    matched = tagged = 0
     with db.tx(conn):
         for r in rows:
             found = by_path.get(_norm(state.abs_path(r["file_rel_path"])))
@@ -117,13 +134,13 @@ def import_xml(conn, xml_path) -> dict:
                 found = next((v for p, v in tails if p.endswith(tail)), None)
             if found is None:
                 continue
-            bpm, key, genre = found
-            # Rekordbox's genre is kept as Rekordbox's own record; DJ Crate's genres are never changed by it.
-            conn.execute("UPDATE tracks SET bpm = coalesce(?, bpm), musical_key = coalesce(?, musical_key), rekordbox_genre = ? WHERE id = ?",
-                         (bpm, key, genre, r["id"]))
+            bpm, key, mytags = found
+            # My Tags are Rekordbox's own record, replaced each time, so a tag removed in Rekordbox goes away on the next export.
+            conn.execute("UPDATE tracks SET bpm = coalesce(?, bpm), musical_key = coalesce(?, musical_key), rekordbox_mytags = ? WHERE id = ?",
+                         (bpm, key, json.dumps(mytags), r["id"]))
             matched += 1
-            genres_seen += bool(genre)
-    return {"matched": matched, "total": len(rows), "in_xml": len(entries), "genres": genres_seen}
+            tagged += bool(mytags)
+    return {"matched": matched, "total": len(rows), "in_xml": len(entries), "mytags": tagged}
 
 
 def run_import(conn) -> dict:
@@ -187,7 +204,7 @@ def _tree(conn, parent_id, ids: dict, skipped: list, counts: dict) -> list[ET.El
         else:
             rows = conn.execute(
                 """SELECT t.id FROM crate_tracks ct JOIN tracks t ON t.id = ct.track_id
-                   WHERE ct.crate_id = ? AND ct.removed_from_source = 0 ORDER BY ct.position""", (c["id"],)).fetchall()
+                   WHERE ct.crate_id = ? AND ct.removed_from_source = 0 AND """ + db.ACTIVE + " ORDER BY ct.position", (c["id"],)).fetchall()
             keys = [ids[r["id"]] for r in rows if r["id"] in ids]
             skipped.extend(r["id"] for r in rows if r["id"] not in ids)
             node = _playlist(c["name"], keys)
@@ -205,7 +222,8 @@ def _playlist(name: str, track_ids: list) -> ET.Element:
 
 def build_export(st, conn) -> tuple[bytes, dict]:
     """The whole `DJ Crate for Rekordbox.xml`: downloaded songs, crates, and sets."""
-    tracks = conn.execute("SELECT * FROM tracks WHERE download_status = 'done' ORDER BY id").fetchall()
+    # Songs in the Trash or hidden aren't sent (DJ Crate treats them as gone).
+    tracks = conn.execute(f"SELECT * FROM tracks t WHERE t.download_status = 'done' AND {db.ACTIVE} ORDER BY t.id").fetchall()
     root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
     ET.SubElement(root, "PRODUCT", Name="DJ Crate", Version=__version__, Company="")
     coll = ET.SubElement(root, "COLLECTION")
@@ -237,7 +255,8 @@ def build_export(st, conn) -> tuple[bytes, dict]:
     for s in conn.execute("SELECT id, name FROM sets ORDER BY name COLLATE NOCASE, id").fetchall():
         path = setboard.get_board(conn, s["id"])["main_path"]
         songs = [r["track_id"] for r in path if r["kind"] == "song" and r["track_id"]]
-        skipped.extend(t for t in songs if t not in ids)
+        gone = {r[0] for r in conn.execute("SELECT id FROM tracks t WHERE NOT " + db.ACTIVE)}  # trashed / hidden: left out quietly
+        skipped.extend(t for t in songs if t not in ids and t not in gone)
         sets.append(_playlist(s["name"], [t for t in songs if t in ids]))
         counts["playlists"] += 1
         n_sets += 1
@@ -287,6 +306,7 @@ def status(conn) -> dict:
         "path": db.get_setting(conn, "rekordbox_xml") or None,
         "at": imp.get("at"), "matched": imp.get("matched", 0), "total": imp.get("total", 0),
         "in_xml": imp.get("in_xml", 0), "error": imp.get("error"),
+        "mytags": conn.execute("SELECT count(*) FROM tracks WHERE rekordbox_mytags IS NOT NULL AND rekordbox_mytags <> '[]'").fetchone()[0],
         "export": {"on": db.get_setting(conn, "rekordbox_export_on") == "1", "path": str(export_path()),
                    "at": exp.get("at"), "playlists": exp.get("playlists", 0), "songs": exp.get("songs", 0),
                    "skipped": exp.get("skipped", 0), "error": exp.get("error")},

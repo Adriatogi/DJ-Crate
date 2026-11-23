@@ -5,7 +5,8 @@ import { emit, findCrate, store } from "./store.js";
 import { confirmDialog, errorToast, h, menu, promptDialog, toast } from "./ui.js";
 
 const SMART_ICONS = {
-  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!",
+  all: "◉", needs_link: "🔗", to_download: "⬇", downloaded: "✓", check_version: "⚠", missing: "!", clean_versions: "🔇", no_crate: "○",
+  hidden: "◌", trash: "🗑",
 };
 
 const collapsed = new Set(JSON.parse(localStorage.getItem("djc.collapsed") || "[]"));
@@ -18,15 +19,17 @@ function saveCollapsed() {
 export function renderSidebar() {
   const data = store.sidebar;
   if (!data) return;
-  const smart = document.getElementById("smart-list");
-  smart.replaceChildren(...data.smart.map((s) => h("div", {
+  const item = (s) => h("div", {
     class: `nav-item smart-${s.key}${store.view === `smart:${s.key}` ? " active" : ""}`,
     onclick: () => emit("select-view", `smart:${s.key}`),
   },
     h("span", { class: "icon" }, SMART_ICONS[s.key] || "•"),
     h("span", { class: "name" }, s.name),
-    h("span", { class: "count" }, ["check_version", "missing"].includes(s.key) && !s.count ? "" : s.count),
-  )));
+    h("span", { class: "count" }, ["check_version", "missing", "clean_versions", "no_crate", "hidden", "trash"].includes(s.key) && !s.count ? "" : s.count),
+  );
+  // Hidden and Trash sit at the end of the same list, after a divider. Songs there don't count anywhere else.
+  const bins = (data.bins || []).map(item);
+  document.getElementById("smart-list").replaceChildren(...data.smart.map(item), ...(bins.length ? [h("div", { class: "nav-sep" }), ...bins] : []));
   document.getElementById("tree").replaceChildren(...data.tree.map(renderNode));
 }
 
@@ -56,7 +59,7 @@ function renderNode(c) {
         renderSidebar();
       },
     }, isFolder ? (isCollapsed ? "▶" : "▼") : ""),
-    h("span", { class: "icon" }, c.genre_id ? h("span", { title: "Follows a genre — it fills itself" }, "🏷") : icon),
+    h("span", { class: "icon" }, icon),
     h("div", { class: "name" },
       h("div", { class: "name" }, c.name),
       h("div", { class: "stats" }, statsLine(c))),
@@ -80,14 +83,6 @@ export function crateMenu(anchor, c) {
     items.push({ label: "New folder inside…", fn: () => newCrate("folder", c.id) });
   }
   if (c.kind === "spotify") items.push({ label: "↻ Re-sync from Spotify", fn: () => emit("resync", c.id) });
-  if (c.genre_id) {
-    items.push({ label: "Show in Genre Rack", fn: () => emit("rack-show", c.genre_id) });
-    items.push({ label: "Stop following the genre", fn: async () => {
-      await post(`/api/crates/${c.id}/unfollow`);
-      emit("refresh-sidebar");
-      toast(`“${c.name}” is a normal crate now. It keeps its songs.`, { type: "success" });
-    } });
-  }
   items.push("-", { label: c.kind === "folder" ? "Delete folder…" : "Delete crate…", danger: true, fn: () => deleteCrate(c) });
   menu(anchor, items);
 }
@@ -118,14 +113,17 @@ async function renameCrate(c) {
 export async function deleteCrate(c) {
   const what = c.kind === "folder" ? "folder and every crate inside it" : "crate";
   const ok = await confirmDialog(`Delete “${c.name}”?`,
-    `This deletes the ${what}. Your songs and files stay in All Tracks — nothing is removed from disk.`,
+    `This deletes the ${what}. Its songs that aren't in another crate go to the Trash, where you can restore them. ` +
+      "Songs that are also in other crates stay where they are. Nothing is removed from disk until you empty the Trash.",
     { ok: "Delete", danger: true });
   if (!ok) return;
   try {
-    await del(`/api/crates/${c.id}`);
+    const r = await del(`/api/crates/${c.id}`);
     if (store.view === `crate:${c.id}`) emit("select-view", "smart:all");
     emit("refresh-sidebar");
-    toast(`Deleted “${c.name}”.`);
+    emit("refresh-tracks");
+    toast(`Deleted “${c.name}”.${r.trashed ? ` ${r.trashed} song${r.trashed === 1 ? "" : "s"} moved to the Trash.` : ""}`,
+      r.trashed ? { action: { label: "Show Trash", fn: () => emit("select-view", "smart:trash") } } : {});
   } catch (e) { errorToast(e); }
 }
 

@@ -2,7 +2,7 @@
 // multi-select (checkboxes only — no Shift-click ranges) and bulk actions.
 
 import { get, native, patch, post } from "./api.js";
-import { genreControl, openBulkGenre } from "./genrepicker.js";
+import { cleanBadge, findTag, otherCopy, swapOwed, swapVersion } from "./cleanver.js";
 import { drag } from "./sidebar.js";
 import { LINK_RE, emit, flatCrates, findCrate, on, store } from "./store.js";
 import {
@@ -72,7 +72,9 @@ function renderEmpty() {
   const q = document.getElementById("search").value.trim();
   const v = store.view;
   let content;
-  if (q) content = [h("h3", {}, `No matches for “${q}”`)];
+  if (store.mytag) content = [h("h3", {}, `No songs here with the My Tag “${store.mytag}”${q ? ` matching “${q}”` : ""}`),
+    h("button", { class: "btn", onclick: () => emit("filter-mytag", null) }, "Show all songs")];
+  else if (q) content = [h("h3", {}, `No matches for “${q}”`)];
   else if (v === "smart:all") {
     content = [
       h("h3", {}, "Your library is empty"),
@@ -87,10 +89,6 @@ function renderEmpty() {
     content = c?.kind === "folder"
       ? [h("h3", {}, "This folder has no songs yet"), h("p", {}, "Make crates inside it, or drag crates in from the sidebar.")]
       : [h("h3", {}, "This crate is empty"), h("p", {}, "Go to All Tracks, tick some songs and use “Add to crate”, or drag rows onto this crate.")];
-  } else if (v === "genre:none") {
-    content = [h("h3", {}, "Every song has a genre. 🎉"), h("p", {}, "Songs with no genre show up here.")];
-  } else if (v.startsWith("genre:")) {
-    content = [h("h3", {}, "No songs with this genre yet"), h("p", {}, "Use the big “+ Add songs” button below to pick some from your library.")];
   } else {
     const msgs = {
       "smart:needs_link": "Every song has a link. 🎉",
@@ -98,6 +96,10 @@ function renderEmpty() {
       "smart:downloaded": "No downloads yet.",
       "smart:check_version": "No length mismatches — every download matches its Spotify length.",
       "smart:missing": "No missing files.",
+      "smart:clean_versions": "No clean versions found. Songs whose YouTube link is the clean copy of an explicit song show up here.",
+      "smart:no_crate": "Every song is in a crate. Songs that aren't in any crate (e.g. from a crate deleted before the Trash existed) show up here.",
+      "smart:hidden": "No hidden songs. Tick songs and choose Hide to keep them out of every list without deleting them.",
+      "smart:trash": "The Trash is empty. Songs you delete, songs from deleted crates and songs removed from a Spotify playlist land here.",
     };
     content = [h("h3", {}, msgs[v] || "Nothing here")];
   }
@@ -132,14 +134,14 @@ function rowFor(t) {
     h("td", { class: "c-sel" }, sel),
     opens(h("td", { class: "c-cover", title: "Open song details" }, coverEl(t))),
     opens(h("td", { title: `${t.title}\nClick to open song details` },
-      h("div", { class: "t-title" }, t.title),
-      t.removed_from_source ? h("span", { class: "chip removed", title: "Removed from the Spotify playlist. Kept here with your notes and file." }, "Removed on Spotify") : null)),
+      t.clean_flag ? h("div", { class: "t-title-row" }, h("div", { class: "t-title" }, t.title), cleanBadge(t)) : h("div", { class: "t-title" }, t.title),
+      t.trash ? h("div", { class: "muted small trash-why" }, trashWhy(t.trash)) : null)),
     opens(h("td", { class: "artist", title: `${t.artists}\nClick to open song details` }, t.artists)),
     h("td", { class: "c-album muted", title: t.album }, t.album),
     h("td", { class: "c-time muted" }, fmtMs(t.duration_ms ?? t.file_duration_ms)),
     h("td", { class: "c-bpm muted", title: t.bpm ? "" : NO_ANALYSIS }, fmtBpm(t.bpm)),
     h("td", { class: "c-key muted", title: t.musical_key ? "" : NO_ANALYSIS }, fmtKey(t.musical_key)),
-    h("td", { class: "c-genre" }, genreControl(t)),
+    h("td", { class: "c-mytags" }, mytagChips(t)),
     h("td", { class: "c-link" }, linkCell(t)),
     h("td", { class: "c-play" }, playButton(t, tr)),
     h("td", { class: "c-status" }, statusCell(t)),
@@ -158,6 +160,28 @@ function rowFor(t) {
   tr.addEventListener("dragend", () => { drag.type = null; });
   if (store.detailId === t.id) tr.classList.add("open");
   return tr;
+}
+
+// Rekordbox My Tags: read-only chips (edit them in Rekordbox). Clicking one shows only songs with that tag.
+export function mytagChips(t, { all = false } = {}) {
+  const tags = t.mytags || [];
+  if (!tags.length) return null;
+  const shown = all ? tags : tags.slice(0, 2);
+  const box = h("div", { class: "mytag-cell", title: `My Tags from Rekordbox: ${tags.join(", ")}\nRead-only. Edit them in Rekordbox. Click a tag to show only songs with it.` },
+    shown.map((tag) => h("button", {
+      class: `mytag${store.mytag && store.mytag.toLowerCase() === tag.toLowerCase() ? " on" : ""}`,
+      onclick: (e) => { e.stopPropagation(); emit("filter-mytag", tag); },
+    }, tag)),
+    tags.length > shown.length ? h("span", { class: "muted small" }, `+${tags.length - shown.length}`) : null);
+  return box;
+}
+
+// Why a song is in the Trash, and since when.
+export function trashWhy(tr) {
+  const why = tr.kind === "crate" ? `From the deleted crate “${tr.crate}”`
+    : tr.kind === "spotify" ? `Removed from the Spotify playlist “${tr.crate}”`
+    : "Deleted";
+  return tr.at ? `${why} · ${ago(tr.at)}` : why;
 }
 
 function linkCell(t) {
@@ -190,7 +214,12 @@ function linkCell(t) {
   });
   const find = h("button", { class: "find-btn", title: "Find YouTube link" }, "Find ▾");
   find.addEventListener("click", (e) => { e.stopPropagation(); openFind(t, find, input); });
-  return h("div", { class: "link-cell" }, input, find);
+  const auto = t.link_auto && t.source_url ? h("span", {
+    class: "auto-tag",
+    title: "Filled by Auto-fill: the top YouTube result whose length matches Spotify's, with no version warnings.\n" +
+      "Worth a quick listen (▶ after downloading). Goes away once you download it or change the link.",
+  }, "Auto") : null;
+  return h("div", { class: "link-cell" }, auto, input, find);
 }
 
 function statusCell(t) {
@@ -209,6 +238,9 @@ function statusCell(t) {
     chips.push(h("div", { class: "status-stack", style: { width: "100%" } },
       h("span", { class: "chip busy" }, stage),
       h("div", { class: "progress" }, h("div", { style: { width: `${pct}%` } }))));
+  } else if (s === "done" && swapOwed(t)) {
+    chips.push(h("span", { class: "chip warn", title: `${t.job_error || "The download failed."}\nThe file is still the old version. Download to try again.` },
+      `${swapOwed(t).to[0].toUpperCase()}${swapOwed(t).to.slice(1)} not downloaded`));
   } else if (s === "done") {
     chips.push(h("span", { class: "chip ok" }, "✓ Downloaded"));
   } else if (s === "error") {
@@ -229,7 +261,7 @@ function statusCell(t) {
 
 function shortError(t) {
   return {
-    unavailable: "Unavailable", needs_cookies: "Needs sign-in", ytdlp_outdated: "Update yt-dlp", invalid_url: "Bad link",
+    unavailable: "Unavailable", needs_cookies: "Needs sign-in", ytdlp_outdated: "Update yt-dlp", no_formats: "No audio offered", invalid_url: "Bad link",
     transient: "Network", disk_full: "Disk full", ffmpeg_missing: "No ffmpeg",
   }[t.error_code] || "Failed";
 }
@@ -250,6 +282,10 @@ function actionButton(t) {
   }
   if (s === "missing") {
     return h("button", { class: "btn small", onclick: (e) => { e.stopPropagation(); relocateTrack(t); } }, "Relocate…");
+  }
+  if (s === "done" && swapOwed(t)) {
+    return h("button", { class: "btn small primary", title: `Try downloading the ${swapOwed(t).to} version again`,
+      onclick: (e) => { e.stopPropagation(); startDownloads([t.id]); } }, "Download");
   }
   if (s === "done") {
     return h("button", {
@@ -335,7 +371,7 @@ function renderBulkbar() {
   if (!ids.length) { bar.hidden = true; return; }
   bar.hidden = false;
   const viewCrate = store.view.startsWith("crate:") ? findCrate(Number(store.view.split(":")[1])) : null;
-  const inCrate = !!viewCrate && viewCrate.kind !== "folder" && !viewCrate.genre_id; // genre crates follow their genre
+  const inCrate = !!viewCrate && viewCrate.kind !== "folder";
   const addBtn = h("button", { class: "btn small" }, "Add to crate ▾");
   addBtn.onclick = () => {
     const crates = flatCrates().filter((c) => c.kind !== "folder");
@@ -343,14 +379,30 @@ function renderBulkbar() {
       ? crates.map((c) => ({ label: c.path, fn: () => addToCrate(ids, c) }))
       : [{ label: "No crates yet — make one with +♪", disabled: true, fn: () => {} }]);
   };
-  const genreBtn = h("button", { class: "btn small" }, "Genre ▾");
-  genreBtn.onclick = () => openBulkGenre(genreBtn, ids);
+  const picked = store.tracks.filter((t) => selected.has(t.id));
+  const toExplicit = picked.filter((t) => otherCopy(t)?.to === "explicit");
+  const toClean = picked.filter((t) => otherCopy(t)?.to === "clean");
+  const n = ids.length;
+  if (store.view === "smart:trash") {
+    fill(bar,
+      h("span", { class: "count" }, `${n} selected`),
+      h("button", { class: "btn small primary", onclick: () => restoreSongs(ids) }, "Restore"),
+      h("button", { class: "btn small danger", onclick: () => deleteForGood(ids) }, "Delete permanently…"),
+      h("div", { class: "spacer" }),
+      h("button", { class: "btn small ghost", onclick: () => { selected.clear(); syncSelection(); } }, "Clear selection"));
+    return;
+  }
+  const hiddenView = store.view === "smart:hidden";
   fill(bar,
-    h("span", { class: "count" }, `${ids.length} selected`),
-    addBtn, genreBtn,
+    h("span", { class: "count" }, `${n} selected`),
+    hiddenView ? h("button", { class: "btn small primary", onclick: () => hideSongs(ids, false) }, "Unhide") : null,
+    addBtn,
     h("button", { class: "btn small", onclick: () => startDownloads(ids) }, "⬇ Download"),
+    toExplicit.length ? h("button", { class: "btn small", onclick: () => swapVersion(toExplicit, "explicit") }, `Swap ${toExplicit.length} to explicit`) : null,
+    toClean.length ? h("button", { class: "btn small", onclick: () => swapVersion(toClean, "clean") }, `Swap ${toClean.length} to clean`) : null,
     inCrate ? h("button", { class: "btn small", onclick: () => removeFromCrate(ids) }, "Remove from crate") : null,
-    h("button", { class: "btn small danger", onclick: () => deleteFromLibrary(ids) }, "Delete from library…"),
+    hiddenView ? null : h("button", { class: "btn small", title: "Hide from every view. Nothing is deleted; find them under Hidden.", onclick: () => hideSongs(ids, true) }, "Hide"),
+    h("button", { class: "btn small danger", onclick: () => moveToTrash(ids) }, "Move to Trash"),
     h("div", { class: "spacer" }),
     h("button", { class: "btn small ghost", onclick: () => { selected.clear(); syncSelection(); } }, "Clear selection"),
   );
@@ -386,20 +438,59 @@ async function removeFromCrate(ids) {
   } catch (e) { errorToast(e); }
 }
 
-async function deleteFromLibrary(ids) {
-  const files = store.tracks.filter((t) => ids.includes(t.id) && t.file_rel_path).length;
-  const ok = await confirmDialog(`Delete ${ids.length} song${ids.length === 1 ? "" : "s"} from the library?`,
-    `They'll be removed from every crate${files ? `, and ${files} MP3 file${files === 1 ? "" : "s"} will be moved to the Trash` : ""}.\n\n` +
-    "If they're in Rekordbox, Rekordbox will show them as missing.\nTo only take songs out of this crate, use “Remove from crate” instead.",
-    { ok: "Delete", danger: true });
+const plural = (n, one = "song") => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+function afterChange(ids) {
+  ids.forEach((id) => selected.delete(id));
+  emit("refresh-tracks");
+  emit("refresh-sidebar");
+}
+
+export async function moveToTrash(ids) {
+  try {
+    const r = await post("/api/tracks/trash", { ids });
+    afterChange(ids);
+    toast(`Moved ${plural(r.trashed)} to the Trash.`, {
+      timeout: 8000,
+      action: { label: "Undo", fn: async () => { await post("/api/tracks/restore", { ids }); afterChange([]); } },
+    });
+  } catch (e) { errorToast(e); }
+}
+
+async function restoreSongs(ids) {
+  try {
+    const r = await post("/api/tracks/restore", { ids });
+    afterChange(ids);
+    toast(`Restored ${plural(r.restored)}.`, { type: "success" });
+  } catch (e) { errorToast(e); }
+}
+
+async function hideSongs(ids, hidden) {
+  try {
+    const r = await post("/api/tracks/hide", { ids, hidden });
+    afterChange(ids);
+    toast(hidden ? `Hid ${plural(r.changed)}. They're under Hidden.` : `Unhid ${plural(r.changed)}.`, hidden ? {
+      timeout: 8000,
+      action: { label: "Undo", fn: async () => { await post("/api/tracks/hide", { ids, hidden: false }); afterChange([]); } },
+    } : { type: "success" });
+  } catch (e) { errorToast(e); }
+}
+
+// Permanently delete (from the Trash only): rows go, MP3s go to the macOS Trash.
+export async function deleteForGood(ids, { all = false } = {}) {
+  const list = all ? store.tracks : store.tracks.filter((t) => ids.includes(t.id));
+  const files = list.filter((t) => t.file_rel_path).length;
+  const ok = await confirmDialog(all ? `Empty the Trash?` : `Permanently delete ${plural(list.length)}?`,
+    `${all ? `All ${plural(list.length)} in the Trash` : (list.length === 1 ? "It" : "They")} will be deleted for good, with their notes and crates` +
+    `${files ? `, and ${plural(files, "MP3 file")} will be moved to the macOS Trash` : ""}. This can't be undone in DJ Crate.\n\n` +
+    "If they're in Rekordbox, Rekordbox will show them as missing.",
+    { ok: all ? "Empty Trash" : "Delete permanently", danger: true });
   if (!ok) return;
   try {
-    const r = await post("/api/tracks/delete", { ids });
-    ids.forEach((id) => selected.delete(id));
+    const r = all ? await post("/api/trash/empty") : await post("/api/tracks/delete", { ids });
+    afterChange(list.map((t) => t.id));
     if (r.failed.length) toast(`Couldn't trash ${r.failed.length} file(s): ${r.failed[0].reason}`, { type: "error", timeout: 9000 });
-    toast(`Deleted ${r.deleted} song${r.deleted === 1 ? "" : "s"}${r.trashed_files ? ` (${r.trashed_files} file${r.trashed_files === 1 ? "" : "s"} in the Trash)` : ""}.`);
-    emit("refresh-tracks");
-    emit("refresh-sidebar");
+    toast(`Deleted ${plural(r.deleted)}${r.trashed_files ? ` (${plural(r.trashed_files, "file")} in the macOS Trash)` : ""}.`);
   } catch (e) { errorToast(e); }
 }
 
@@ -416,6 +507,7 @@ async function openFind(t, anchor, input) {
       if (!box.isConnected) return;
       renderFind(box, t, r, input, () => load(true));
       searchAhead(t);
+      markCleanResults(box, t, r, input);
     } catch (e) {
       if (!box.isConnected) return;
       fill(box,
@@ -427,6 +519,16 @@ async function openFind(t, anchor, input) {
     }
   };
   load();
+}
+
+// After Find shows its results, ask (behind the scenes) which are the clean copy of an
+// explicit song, and mark them. Find never waits for this.
+async function markCleanResults(box, t, r, input) {
+  let clean;
+  try { clean = (await get(`/api/tracks/${t.id}/yt_search/clean`)).clean; } catch { return; }
+  if (!box.isConnected || !Object.keys(clean).length) return;
+  r.results.forEach((res) => { res.clean_of = clean[res.url] || null; });
+  renderFind(box, t, r, input, () => {});
 }
 
 // Quietly search the next songs in on-screen order that still need a link, so
@@ -466,7 +568,17 @@ function renderFind(box, t, r, input, refresh) {
     },
       h("div", { class: "rt" }, res.title),
       h("div", { class: "rm" }, [res.channel, fmtMs(res.duration_ms)].filter(Boolean).join(" · "), lengthNote ? " · " : "", lengthNote),
-      res.flags.map((f) => h("div", { class: "flagline" }, "⚠ " + f)));
+      res.flags.map((f) => h("div", { class: "flagline" }, "⚠ " + f)),
+      findTag(res),
+      res.clean_of ? h("span", {
+        class: "use-explicit",
+        onclick: (e) => {
+          e.stopPropagation();
+          input.value = `https://www.youtube.com/watch?v=${res.clean_of.video_id}`;
+          input.dispatchEvent(new Event("change"));
+          closePopover();
+        },
+      }, "Use the explicit one instead") : null);
   });
   fill(box,
     h("div", { class: "head" }, `Results for “${r.query}” · Spotify length ${fmtMs(t.duration_ms)}. Pick the right one — green means the length matches.`),
@@ -531,7 +643,8 @@ function togglePlayer(t, tr) {
   playBtn?.classList.add("active");
   if (playBtn) playBtn.textContent = "■";
   player = { trackId: t.id, row, playBtn, trackRow: tr };
-  a.src = `/api/tracks/${t.id}/audio`;
+  // The file can be replaced at the same path (re-download, version swap): a new URL per version skips any cached copy.
+  a.src = `/api/tracks/${t.id}/audio?v=${encodeURIComponent(t.updated_at || "")}-${t.file_duration_ms || ""}`;
   a.play().catch(() => {});
 }
 
@@ -567,12 +680,12 @@ export function resetTable() {
 }
 
 export function initTracks() {
+  on("track-changed", updateTrack);
   document.getElementById("select-all").addEventListener("change", (e) => {
     if (e.target.checked) store.tracks.forEach((t) => selected.add(t.id));
     else selected.clear();
     syncSelection();
   });
-  on("track-genres", updateTrack);
   on("detail-changed", () => {
     for (const [id, { tr }] of rows) tr.classList.toggle("open", store.detailId === id);
   });

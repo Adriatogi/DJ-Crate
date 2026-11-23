@@ -228,3 +228,6 @@ testing_sound/
 CLAUDE.md
 rekordbox.xml
 rekorbox_to_dj_crate.xml
+
+# Local research files (test MP3s are copyrighted: never commit)
+research/

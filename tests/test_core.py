@@ -95,3 +95,19 @@ def test_mix_flags():
     assert mix_flags("Strobe - Extended Mix", "deadmau5 - Strobe") == ["Missing “Extended Mix”"]
     assert mix_flags("Strobe - Extended Mix", "deadmau5 - Strobe (Extended Mix)") == []
     assert mix_flags("Song", "Song (Official Audio)") == []
+
+
+def test_updated_ytdlp_is_used_only_when_newer(tmp_path, monkeypatch):
+    """Update yt-dlp installs into Application Support (uv run resets the project environment on start)."""
+    from djcrate import tools
+    d = tmp_path / "yt-dlp"
+    monkeypatch.setattr(tools, "updated_ytdlp_dir", lambda: d)
+    monkeypatch.setattr(tools, "_bundled_version", lambda: "2026.8.19")
+    assert tools._ytdlp_base()[1:] == ["-m", "yt_dlp"]                      # nothing updated yet
+    (d / "yt_dlp").mkdir(parents=True)
+    (d / "yt_dlp" / "version.py").write_text("__version__ = '2026.10.26'\n")
+    base = tools._ytdlp_base()
+    assert base[1] == "-c" and str(d) in base[2]                             # the newer, updated copy
+    monkeypatch.setattr(tools, "_bundled_version", lambda: "2027.01.02")     # the project caught up (uv sync)
+    assert tools._ytdlp_base()[1:] == ["-m", "yt_dlp"]
+    assert tools._version_key("2026.8.19") == tools._version_key("2026.08.19")

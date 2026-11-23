@@ -2,16 +2,16 @@
 // screens, Activity panel, keyboard shortcuts.
 
 import { get, native, post } from "./api.js";
-import { initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
+import { swapVersion } from "./cleanver.js";
+import { autofillProgress, initCrates, refreshSidebar, refreshTracks, selectView } from "./crates.js";
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
 import { showDocs } from "./docs.js";
-import { initRack, leaveRack, showRack } from "./rack.js";
 import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
 import { closePlayer, playerOpen, resetTable, togglePlayPause } from "./tracks.js";
-import { copyText, errorToast, fill, h, toast } from "./ui.js";
+import { copyText, errorToast, fill, h, toast, toolOutput } from "./ui.js";
 
 let tab = "crates";
 let failures = 0;
@@ -23,20 +23,22 @@ let everConnected = false;
 let openedPath = null;
 let searchPaused = false;
 let lastRekordboxAt;
-let lastLookedUp;
-let lastGenreRefresh = 0;
+let lastCleanFlagAt;
+let shownBatchEnd;   // the finished run we've already shown (by its time); set on the first poll
+let batchEndTimer = null;
+let batchEndShowing = false;
+let lastCleanNotice = 0;
+let cleanSeen = 0;
 let pendingTrackRefresh = false;
 
 // ------------------------------------------------ tabs
 
 function showTab(name) {
-  if (tab === "rack" && name !== "rack") leaveRack(); // hands the song table back to Crates
   tab = name;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   if (name === "sets") showSets();
   if (name === "cutting") showCutting();
-  if (name === "rack") showRack();
   if (name === "docs") showDocs();
   if (name === "settings") showSettings();
   if (name !== "crates") closePlayer();
@@ -58,6 +60,8 @@ async function poll() {
   failures = 0;
   const prev = store.status;
   store.status = s;
+  // The My Tags column and filter only show once some song has My Tags from Rekordbox (or a filter is on).
+  document.body.classList.toggle("no-mytags", !(s.rekordbox?.mytags || store.mytag));
   if (s.spotify.connected) everConnected = true;
   const libStatus = s.library.status;
   if (libStatus !== lastLibraryStatus) {
@@ -83,34 +87,39 @@ async function poll() {
     showStartup(s);
   }
   renderStrip(s);
+  renderProgress(s);
   renderBanners(s);
   if (libStatus === "ok") {
     const q = s.queue;
     const key = `${q.queued}|${q.running}|${q.failed}|${q.interrupted}`;
     // While downloads run, keep the table + counts live.
     if (q.queued || q.running || key !== lastQueueKey) {
-      if (tab === "crates" || tab === "rack") refreshTracks();
+      if (tab === "crates") refreshTracks();
       if (key !== lastQueueKey) refreshSidebar();
     }
     lastQueueKey = key;
     // Rekordbox re-export picked up by the watcher: refresh BPM & key.
     const rb = s.rekordbox;
     if (rb && lastRekordboxAt !== undefined && rb.at && rb.at !== lastRekordboxAt) {
-      if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
+      if (tab === "crates") refreshTracks(); else pendingTrackRefresh = true;
       if (tab === "settings") showSettings();
       toast(rb.error || `Updated BPM & key for ${rb.matched} songs from Rekordbox`, { type: rb.error ? "warn" : "success" });
     }
     lastRekordboxAt = rb?.at ?? null;
-    // Background genre suggestions arriving: refresh the table now and then (never while you're typing in it).
-    const gl = s.genres;
-    if (gl) {
-      if (lastLookedUp === undefined) lastLookedUp = gl.looked_up;
-      else if (gl.looked_up !== lastLookedUp && Date.now() - lastGenreRefresh > 30000) {
-        lastLookedUp = gl.looked_up;
-        lastGenreRefresh = Date.now();
-        if (tab === "crates" || tab === "rack") refreshTracks(); else pendingTrackRefresh = true;
-      }
+    // The background clean check found a clean version: say so once, with the choice right there.
+    // While it works through your existing songs, finds are summed up (at most one notice a minute).
+    const cf = s.clean?.last_flag;
+    if (lastCleanFlagAt === undefined) { lastCleanFlagAt = cf?.at ?? null; cleanSeen = s.clean?.flagged ?? 0; }
+    else if (cf && cf.at !== lastCleanFlagAt && Date.now() - lastCleanNotice > 60000) {
+      lastCleanFlagAt = cf.at;
+      lastCleanNotice = Date.now();
+      const found = Math.max(1, (s.clean.flagged ?? 0) - cleanSeen);
+      cleanSeen = s.clean.flagged ?? 0;
+      if (tab === "crates") refreshTracks(); else pendingTrackRefresh = true;
+      emit("refresh-sidebar");
+      announceClean(cf, found);
     }
+    if (tab === "crates") autofillProgress(s.autofill);
     if (q.interrupted && !interruptedPrompted) promptInterrupted(q.interrupted);
   }
   const badge = document.getElementById("activity-count");
@@ -142,6 +151,63 @@ function promptInterrupted(n) {
       { label: "Discard", fn: async () => { await post("/api/jobs/interrupted", { resume: false }); poll(); } },
     ],
   });
+}
+
+// Just information (some gigs want clean): say what was found, with a swap one click away.
+async function announceClean(cf, found) {
+  if (found > 1) {
+    toast(`${found} songs are clean versions. YouTube Music also has them as explicit.`, {
+      timeout: 12000,
+      action: { label: "Show them", fn: () => { emit("show-tab", "crates"); selectView("smart:clean_versions"); } },
+    });
+    return;
+  }
+  toast(`“${cf.title}” is the clean version. YouTube Music also has the explicit one.`, {
+    timeout: 12000,
+    action: { label: "Swap to explicit", fn: async () => { const r = await get(`/api/tracks/${cf.track_id}`); await swapVersion([r.track], "explicit"); } },
+  });
+}
+
+// ------------------------------------------------ overall download progress
+
+const PAUSED = {
+  ffmpeg_missing: "ffmpeg is missing", library_missing: "library folder not reachable", disk_full: "disk is full",
+  offline: "you're offline", rate_limited: "YouTube is rate-limiting",
+};
+
+function renderProgress(s) {
+  const el = document.getElementById("dl-progress");
+  const b = s.library?.status === "ok" ? s.queue?.batch : null;
+  const bar = (fraction, cls = "") => h("div", { class: `progress ${cls}` }, h("div", { style: { width: `${Math.round(fraction * 100)}%` } }));
+  if (b) {
+    clearTimeout(batchEndTimer);
+    batchEndShowing = false;
+    const paused = s.queue.paused_reason;
+    const text = paused
+      ? `Paused: ${PAUSED[paused] || paused.replace(/_/g, " ")}`
+      : `${b.done}/${b.total} downloaded${b.failed ? ` · ${b.failed} failed` : ""}`;
+    el.title = [...b.running.map((r) => `${r.title} — ${r.artists} · ${r.stage === "downloading" ? `${Math.round(r.progress * 100)}%` : r.stage}`),
+      b.queued ? `${b.queued} waiting` : null, b.failed ? `${b.failed} failed` : null, "Click for details"].filter(Boolean).join("\n");
+    el.className = paused ? "paused" : b.failed ? "failed" : "";
+    fill(el, bar(b.total ? b.done / b.total : 0), h("span", {}, text));   // simple: songs finished out of the total
+    el.hidden = false;
+    return;
+  }
+  // The run just finished: say how it went for a few seconds, once.
+  const last = s.queue?.last_batch;
+  if (shownBatchEnd === undefined) shownBatchEnd = last?.at ?? null;   // don't replay an old run after a reload
+  if (last && last.at !== shownBatchEnd) {
+    shownBatchEnd = last.at;
+    el.className = last.failed ? "failed" : "finished";
+    el.title = last.failed ? "Click to see what failed" : "";
+    fill(el, bar(1), h("span", {}, last.failed ? `Downloaded ${last.done} · ${last.failed} failed` : `Downloaded ${last.done} ✓`));
+    el.hidden = false;
+    clearTimeout(batchEndTimer);
+    batchEndShowing = true;
+    batchEndTimer = setTimeout(() => { batchEndShowing = false; el.hidden = true; }, last.failed ? 12000 : 6000);
+    return;
+  }
+  if (!batchEndShowing) el.hidden = true;
 }
 
 // ------------------------------------------------ status strip & banners
@@ -367,6 +433,7 @@ function showCrash() {
 
 // ------------------------------------------------ activity panel
 
+
 async function renderActivity() {
   const panel = document.getElementById("activity-panel");
   let d;
@@ -376,6 +443,7 @@ async function renderActivity() {
     h("div", { class: `jm ${j.status === "failed" ? "err" : ""}` },
       j.status === "running" ? `${j.stage || "downloading"} ${j.stage === "downloading" ? Math.round(j.progress * 100) + "%" : ""}` :
         j.status === "queued" ? (j.error_msg || "Queued") : j.error_msg || j.status),
+    j.status === "failed" && j.error_detail ? toolOutput(j.error_detail, `job:${j.id}`) : null,
     extra.length ? h("div", { class: "ja" }, extra) : null);
   const btn = (label, fn, kind = "small") => h("button", { class: `btn ${kind}`, onclick: async () => { try { await fn(); } catch (e) { errorToast(e); } renderActivity(); poll(); } }, label);
   const sections = [];
@@ -395,7 +463,10 @@ async function renderActivity() {
       h("div", { class: "actions" }, btn("Retry all failed", () => post("/api/jobs/retry", {}), "small primary")),
       d.failed.map((j) => jobView(j, [
         btn("Retry", () => post("/api/jobs/retry", { ids: [j.id] })),
-        btn("Copy error details", async () => { await copyText(`${j.title} — ${j.artists}\n${j.error_code}: ${j.error_msg}`); toast("Copied."); }),
+        btn("Copy error details", async () => {
+          await copyText(`${j.title} — ${j.artists}\n${j.error_code}: ${j.error_msg}${j.error_detail ? `\n\nyt-dlp said:\n${j.error_detail}` : ""}`);
+          toast("Copied.");
+        }),
         btn("Dismiss", () => post(`/api/jobs/${j.id}/dismiss`)),
       ])));
   }
@@ -432,6 +503,7 @@ function toggleActivity(force) {
 function init() {
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   document.getElementById("activity-btn").addEventListener("click", () => toggleActivity());
+  document.getElementById("dl-progress").addEventListener("click", (e) => { e.stopPropagation(); toggleActivity(true); });
   document.addEventListener("mousedown", (e) => {
     const panel = document.getElementById("activity-panel");
     if (!panel.hidden && !panel.contains(e.target) && !document.getElementById("activity-btn").contains(e.target)) toggleActivity(false);
@@ -457,7 +529,6 @@ function init() {
   window.addEventListener("error", (e) => console.error(e.error || e.message));
   window.addEventListener("unhandledrejection", (e) => { console.error(e.reason); });
   initCrates();
-  initRack();
   poll();
   setInterval(poll, 2000);
 }
