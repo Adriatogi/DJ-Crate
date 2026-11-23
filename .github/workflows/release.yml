@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-latest   # Apple Silicon (a specific version like macos-14 gets retired)
+    runs-on: macos-15   # Apple Silicon. Images get retired (macos-14 was, Nov 2026): bump this when GitHub announces it
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
