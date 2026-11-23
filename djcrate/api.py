@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, autofill, backup, cleancheck, trash, cutting, db, genius, libraries, library, rekordbox, setboard, spotify, tags, tools, yt_search, ytmusic
+from . import __version__, autofill, backup, cleancheck, config, cookies, trash, cutting, db, genius, libraries, library, rekordbox, setboard, spotify, tags, tools, updates, yt_search, ytmusic
 from .config import DEFAULT_LIBRARY, LOG_DIR, get_port, update_config
 from .downloader import DownloadManager, valid_link
 from .errors import AppError
@@ -113,6 +113,9 @@ def status():
         state.status = lib["status"] = "library_missing"
     out = {
         "version": __version__,
+        "install": "app" if config.BUNDLED else "git",
+        "translocated": config.TRANSLOCATED,
+        "update": updates.cached(),
         "library": lib,
         "tools": {"ffmpeg": tools.ffmpeg_dir() is not None, "ytdlp": tools.ytdlp_version(), "js": tools.js_runtime()},
         "spotify": {"client_id_set": False, "connected": False, "login": dict(spotify.login_result),
@@ -136,6 +139,7 @@ def status():
             out["rekordbox"] = rekordbox.status(conn)
             out["clean"] = cleancheck.status(conn, clean_checker)
             out["autofill"] = auto_filler.status()
+            out["onboarding"] = _onboarding(conn)
             for row in conn.execute("SELECT status, count(*) n FROM jobs WHERE status IN ('queued','running','failed','interrupted') GROUP BY status"):
                 out["queue"][row["status"]] = row["n"]
             out["queue"]["outdated"] = conn.execute(
@@ -148,6 +152,39 @@ def status():
         finally:
             conn.close()
     return out
+
+
+def _onboarding(conn) -> dict:
+    """How far this library is through the Getting started steps (each library is its own person)."""
+    one = lambda q: conn.execute(q).fetchone()[0]
+    out = {
+        "asked": db.get_setting(conn, "onboarding_asked") == "1",
+        "dismissed": db.get_setting(conn, "onboarding_dismissed") == "1",
+        "playlists": one("SELECT count(*) FROM crates WHERE kind = 'spotify'"),
+        "linked": one(f"SELECT count(*) FROM tracks t WHERE coalesce(t.source_url, '') <> '' AND {db.ACTIVE}"),
+        "downloaded": one(f"SELECT count(*) FROM tracks t WHERE t.download_status = 'done' AND {db.ACTIVE}"),
+    }
+    # Only a brand-new library gets asked "want a walkthrough?". One already in use counts as asked
+    # (and the guide stays hidden); Settings → About → Setup guide still opens it any time.
+    out["fresh"] = not out["playlists"] and not one("SELECT count(*) FROM tracks")
+    if not out["asked"] and not out["fresh"]:
+        out.update(asked=True, dismissed=True)
+    return out
+
+
+class OnboardingBody(BaseModel):
+    dismissed: bool | None = None
+    asked: bool | None = None
+
+
+@app.post("/api/onboarding")
+def set_onboarding(body: OnboardingBody, conn=Depends(get_conn)):
+    with db.tx(conn):
+        if body.dismissed is not None:
+            db.set_setting(conn, "onboarding_dismissed", "1" if body.dismissed else "0")
+        if body.asked is not None:
+            db.set_setting(conn, "onboarding_asked", "1" if body.asked else "0")
+    return _onboarding(conn)
 
 
 _connected_cache: dict[tuple, bool] = {}
@@ -1461,6 +1498,8 @@ def get_settings(conn=Depends(get_conn)):
         "port": get_port(),
         "cookies_browser": db.get_setting(conn, "cookies_browser", ""),
         "cookie_browsers": list(COOKIE_BROWSERS),
+        "cookies_profile": db.get_setting(conn, "cookies_profile", ""),
+        "cookie_profiles": cookies.profiles(db.get_setting(conn, "cookies_browser", "")),
         "library_path": str(state.library),
         "library_name": db.get_setting(conn, "library_name") or state.library.name,
         "ask_on_launch": libraries.ask_on_launch(),
@@ -1472,7 +1511,27 @@ def get_settings(conn=Depends(get_conn)):
         "js_runtime": tools.js_runtime(),
         "js_runtime_path": tools.which(tools.js_runtime()) if tools.js_runtime() else None,
         "backups": backup.list_backups(state),
+        "update_check": updates.enabled(),
+        "version": __version__,
+        "install": "app" if config.BUNDLED else "git",
     }
+
+
+@app.post("/api/cookies/test")
+def test_cookies(conn=Depends(get_conn)):
+    """Read the chosen browser's YouTube cookies now (macOS may ask for Keychain access) and say how it went."""
+    browser = db.get_setting(conn, "cookies_browser", "")
+    if not browser:
+        raise AppError("cookies_off", "Pick a browser first.")
+    try:
+        return cookies.export(browser, db.get_setting(conn, "cookies_profile", ""))
+    except cookies.CookieError as e:
+        return {"ok": False, "code": e.code, "message": e.message, "output": e.output}
+
+
+@app.post("/api/update/check")
+def check_for_update():
+    return updates.check(force=True)
 
 
 class SettingsPatch(BaseModel):
@@ -1480,7 +1539,9 @@ class SettingsPatch(BaseModel):
     search_ahead: int | None = None
     spotify_client_id: str | None = None
     cookies_browser: str | None = None
+    cookies_profile: str | None = None
     port: int | None = None
+    update_check: bool | None = None
 
 
 @app.patch("/api/settings")
@@ -1505,7 +1566,18 @@ def patch_settings(body: SettingsPatch, conn=Depends(get_conn)):
         if body.cookies_browser is not None:
             if body.cookies_browser not in COOKIE_BROWSERS:
                 raise AppError("bad_browser", "Unknown browser.")
+            if body.cookies_browser != db.get_setting(conn, "cookies_browser", ""):
+                db.set_setting(conn, "cookies_profile", "")   # profiles belong to one browser
+                cookies.forget()
             db.set_setting(conn, "cookies_browser", body.cookies_browser)
+        if body.cookies_profile is not None:
+            browser = db.get_setting(conn, "cookies_browser", "")
+            if body.cookies_profile and body.cookies_profile not in [p["id"] for p in cookies.profiles(browser)]:
+                raise AppError("bad_profile", "That profile wasn't found.")
+            db.set_setting(conn, "cookies_profile", body.cookies_profile)
+            cookies.forget()
+    if body.update_check is not None:
+        updates.set_enabled(body.update_check)
     if body.port is not None and body.port != get_port():
         if not 1024 <= body.port <= 65535:
             raise AppError("bad_port", "Pick a port between 1024 and 65535.")

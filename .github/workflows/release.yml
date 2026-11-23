@@ -1,0 +1,65 @@
+# Builds DJ Crate.app and publishes a GitHub Release when you push a version tag:
+#   1. bump __version__ in djcrate/__init__.py and add a "## X.Y.Z" section to CHANGELOG.md
+#   2. git commit, then: git tag vX.Y.Z && git push --tags
+# Tags like v1.2.0-rc1 become pre-releases (the app's update check ignores those).
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: macos-14   # Apple Silicon
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.1"   # pinned: same uv => same bundled Python build
+
+      - name: Tag matches the version
+        run: scripts/check_version.sh "$GITHUB_REF_NAME"
+
+      - name: Install tools for tests
+        run: brew install ffmpeg
+
+      - name: Tests
+        run: uv sync --frozen && uv run pytest -q
+
+      - uses: actions/cache@v4
+        with:
+          path: build/dl
+          key: release-deps-${{ hashFiles('scripts/release-deps.env') }}
+
+      - name: Build the app
+        run: scripts/build_release.sh
+
+      - name: Smoke test the zip
+        run: scripts/smoke_release.sh "dist/DJ-Crate-$(sed -n 's/^__version__ = "\(.*\)"/\1/p' djcrate/__init__.py)-arm64.zip"
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          V="${GITHUB_REF_NAME#v}"; V="${V%%-*}"
+          awk -v v="$V" '$0 ~ "^## "v"( |$)" {f=1; next} /^## / {f=0} f' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no notes for $V"; exit 1; }
+          cat >> notes.md <<'TXT'
+
+          ---
+          **Install:** download `DJ-Crate-…-arm64.zip`, unzip it and drag **DJ Crate** into Applications. The first time, macOS says it can't verify the app: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. Apple Silicon Macs, macOS 13 or newer. **Updating:** replace the app; your music and crates are kept.
+          TXT
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRE=""; case "$GITHUB_REF_NAME" in *-*) PRE="--prerelease";; esac
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.sha256 dist/*-source.tar.xz \
+            --title "DJ Crate ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag $PRE

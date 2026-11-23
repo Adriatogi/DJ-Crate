@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds "DJ Crate.app" inside this folder (next to the code) so you can launch
 # it from Finder, Spotlight or the Dock. The app just runs this repo's venv python.
+# (For the downloadable, self-contained app, see build_release.sh.)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$REPO/DJ Crate.app"
@@ -14,16 +15,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # App icon: PNG -> iconset -> .icns (sips/iconutil ship with macOS)
+source "$REPO/scripts/lib_icon.sh"
 ICON_PNG="$REPO/djcrate/web/icon.png"
 [ -f "$ICON_PNG" ] || python3 "$REPO/scripts/make_icon.py"
-ICONSET="$(mktemp -d)/AppIcon.iconset"
-mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  sips -z $s $s "$ICON_PNG" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s * 2)) $((s * 2)) "$ICON_PNG" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-rm -rf "$(dirname "$ICONSET")"
+make_icns "$ICON_PNG" "$APP/Contents/Resources/AppIcon.icns"
+VERSION="$(djcrate_version "$REPO")"
 
 cat > "$APP/Contents/MacOS/DJ Crate" <<LAUNCH
 #!/bin/bash
@@ -45,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>DJ Crate</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>

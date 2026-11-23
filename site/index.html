@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJ Crate</title>
+  <!-- ADRIAN: meta description. One sentence for search results and link previews. -->
+  <meta name="description" content="DJ Crate for macOS">
+  <meta property="og:title" content="DJ Crate">
+  <!-- ADRIAN: og:description. Same sentence as the meta description, for link previews. -->
+  <meta property="og:description" content="DJ Crate for macOS">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://adriatogi.github.io/DJ-Crate/">
+  <meta property="og:image" content="https://adriatogi.github.io/DJ-Crate/assets/social-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top">
+      <img src="assets/logo.png" alt="" width="32" height="32">
+      <span>DJ Crate</span>
+    </a>
+    <nav class="nav">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/Adriatogi/DJ-Crate">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <img class="hero-logo" src="assets/logo.png" alt="DJ Crate logo" width="112" height="112">
+      <h1>
+        <!-- ADRIAN: hero headline. One line, what DJ Crate is. -->
+        <span class="todo">[ADRIAN: hero headline]</span>
+      </h1>
+      <p class="lead">
+        <!-- ADRIAN: hero subline. One or two sentences under the headline. -->
+        <span class="todo">[ADRIAN: hero subline]</span>
+      </p>
+      <a class="btn btn-primary btn-big" href="https://github.com/Adriatogi/DJ-Crate/releases/latest">Download for Mac</a>
+      <p class="small muted">macOS 13+ · Apple Silicon · Free &amp; open source <span id="version" class="version"></span></p>
+    </div>
+  </section>
+
+  <section id="features" class="section">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Spotify playlists become crates</h3>
+          <!-- ADRIAN: feature blurb. Importing Spotify playlists as crates. -->
+          <p><span class="todo">[ADRIAN: Spotify → crates blurb]</span></p>
+        </article>
+        <article class="card">
+          <h3>Pick the exact link</h3>
+          <!-- ADRIAN: feature blurb. Find, length matching, version warnings, Auto-fill. -->
+          <p><span class="todo">[ADRIAN: pick the exact link blurb]</span></p>
+        </article>
+        <article class="card">
+          <h3>Downloads Rekordbox-ready MP3s</h3>
+          <!-- ADRIAN: feature blurb. Tagged MP3s in one library folder. -->
+          <p><span class="todo">[ADRIAN: Rekordbox-ready MP3s blurb]</span></p>
+        </article>
+        <article class="card">
+          <h3>Cutting</h3>
+          <!-- ADRIAN: feature blurb. Notes on how songs mix into each other. -->
+          <p><span class="todo">[ADRIAN: Cutting blurb]</span></p>
+        </article>
+        <article class="card">
+          <h3>Set Setter</h3>
+          <!-- ADRIAN: feature blurb. Planning sets on a board. -->
+          <p><span class="todo">[ADRIAN: Set Setter blurb]</span></p>
+        </article>
+        <article class="card">
+          <h3>Works with Rekordbox</h3>
+          <!-- ADRIAN: feature blurb. BPM/key/My Tags in from XML, crates out as playlists. -->
+          <p><span class="todo">[ADRIAN: works with Rekordbox blurb]</span></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="screenshots" class="section section-alt">
+    <div class="wrap">
+      <h2>Screenshots</h2>
+      <div class="shots">
+        <!-- ADRIAN: screenshot 1. Replace the div with <img src="assets/..." alt="..."> -->
+        <div class="shot"><span class="todo">[ADRIAN: screenshot of a crate with links picked]</span></div>
+        <!-- ADRIAN: screenshot 2. Replace the div with <img src="assets/..." alt="..."> -->
+        <div class="shot"><span class="todo">[ADRIAN: screenshot of Find with the length match]</span></div>
+        <!-- ADRIAN: screenshot 3. Replace the div with <img src="assets/..." alt="..."> -->
+        <div class="shot"><span class="todo">[ADRIAN: screenshot of Set Setter board]</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="section">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><strong>Import a Spotify playlist.</strong> It becomes a crate with each song's title, artists, album, cover and length.</li>
+        <li><strong>Pick a link for each song.</strong> Paste one, use Find (it highlights the result whose length matches Spotify's and warns about other versions), or Auto-fill.</li>
+        <li><strong>Download.</strong> Each song becomes a tagged <code>Title - Artist.mp3</code> in one library folder.</li>
+        <li><strong>Import into Rekordbox and prep.</strong> Add notes, Cutting and sets; send crates and sets to Rekordbox as playlists.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="install" class="section section-alt">
+    <div class="wrap narrow">
+      <h2>Install</h2>
+      <ol class="install">
+        <li><a href="https://github.com/Adriatogi/DJ-Crate/releases/latest">Download the latest <code>.zip</code></a> from GitHub Releases.</li>
+        <li>Unzip it (double-click in Finder).</li>
+        <li>Drag <strong>DJ Crate.app</strong> into <strong>Applications</strong>.</li>
+        <li>Open it. The first time, macOS says <em>"Apple could not verify 'DJ Crate' is free of malware…"</em>. Click <strong>Done</strong>.</li>
+        <li>Open <strong>System Settings → Privacy &amp; Security</strong>, scroll down and click <strong>Open Anyway</strong> next to DJ Crate, then enter your password. You only do this once.</li>
+        <li>If macOS asks for Keychain access (for your Spotify login), click <strong>Always Allow</strong>. This also happens only once.</li>
+      </ol>
+      <p class="muted">Requires macOS 13 or later on an Apple Silicon Mac. Developers and Intel Macs: use the <a href="https://github.com/Adriatogi/DJ-Crate#for-developers">install script in the README</a>, which builds from source.</p>
+    </div>
+  </section>
+
+  <section id="faq" class="section">
+    <div class="wrap narrow">
+      <h2>FAQ</h2>
+      <details class="faq">
+        <summary>Is it free?</summary>
+        <!-- ADRIAN: answer to "Is it free?". -->
+        <p><span class="todo">[ADRIAN: answer to "Is it free?"]</span></p>
+      </details>
+      <details class="faq">
+        <!-- ADRIAN: FAQ question 1. -->
+        <summary><span class="todo">[ADRIAN: FAQ question 1]</span></summary>
+        <!-- ADRIAN: FAQ answer 1. -->
+        <p><span class="todo">[ADRIAN: FAQ answer 1]</span></p>
+      </details>
+      <details class="faq">
+        <!-- ADRIAN: FAQ question 2. -->
+        <summary><span class="todo">[ADRIAN: FAQ question 2]</span></summary>
+        <!-- ADRIAN: FAQ answer 2. -->
+        <p><span class="todo">[ADRIAN: FAQ answer 2]</span></p>
+      </details>
+      <details class="faq">
+        <!-- ADRIAN: FAQ question 3. -->
+        <summary><span class="todo">[ADRIAN: FAQ question 3]</span></summary>
+        <!-- ADRIAN: FAQ answer 3. -->
+        <p><span class="todo">[ADRIAN: FAQ answer 3]</span></p>
+      </details>
+    </div>
+  </section>
+
+  <section id="support" class="section section-alt">
+    <div class="wrap narrow center">
+      <h2>Support</h2>
+      <!-- ADRIAN: support pitch. A line or two asking for a coffee. -->
+      <p><span class="todo">[ADRIAN: support pitch]</span></p>
+      <!-- ADRIAN: replace ADRIAN-LINK with your Buy Me a Coffee username. -->
+      <a class="btn btn-coffee" href="https://buymeacoffee.com/ADRIAN-LINK">Buy Me a Coffee</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>
+      <a href="https://github.com/Adriatogi/DJ-Crate/blob/main/LICENSE">GPL-3.0</a> ·
+      <a href="https://github.com/Adriatogi/DJ-Crate">GitHub</a> ·
+      <a href="https://github.com/Adriatogi/DJ-Crate#readme">Docs</a>
+    </p>
+    <p class="small muted">DJ Crate only downloads links you choose. Downloading from YouTube may break YouTube's terms of service; use it for music you have the right to use.</p>
+  </div>
+</footer>
+
+<script src="site.js" defer></script>
+</body>
+</html>

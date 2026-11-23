@@ -4,6 +4,21 @@
 <h2 id="what">What DJ Crate is</h2>
 <p>Your prep room before Rekordbox. DJ Crate helps you find songs, get the right audio files, catalogue them, and remember what works together. Then you take the music to Rekordbox to analyse, cue and perform.</p>
 
+<h2 id="start">Getting started</h2>
+<p>The first time takes about 10 minutes. The <b>Getting started</b> checklist (bottom right) follows along and ticks each step off; Settings → About → <b>Setup guide</b> brings it back.</p>
+<ol>
+  <li><b>Open the app.</b> Unzip the download and drag <b>DJ Crate</b> into Applications. The first time you open it, macOS says it can't verify the app (DJ Crate isn't paid-signed with Apple). Click <b>Done</b>, open <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>, then enter your Mac password. You only do this once.
+    <!-- ADRIAN: screenshot of the Open Anyway button in System Settings -->
+  </li>
+  <li><b>Create a library.</b> One folder for all your MP3s and DJ Crate's data (it's what Rekordbox imports). The app suggests <code>~/Music/DJ Crate</code>; an external drive works too.</li>
+  <li><b>Connect Spotify</b> (once, about 2 minutes, needs Spotify Premium). Settings → Spotify walks you through it: make a free app on Spotify's developer dashboard, add the redirect URI (there's a Copy button), paste its Client ID and log in. See <a href="#faq-spotify">the FAQ</a> if it complains.</li>
+  <li><b>Import a playlist.</b> <b>+ Import Spotify playlist</b> turns it into a crate with every song's title, artists, cover and length.</li>
+  <li><b>Pick the links.</b> In <b>Needs Link</b>, click <b>Find ▾</b> on a song: the green result matches Spotify's length and has no "live", "remix" or "sped up" warnings. Or click <b>Auto-fill links</b> to fill every song that has a sure match and leave the rest for you.</li>
+  <li><b>Download.</b> <b>Ready to Download → Download All.</b> Each song becomes a tagged <code>Title - Artist.mp3</code> in your library folder.</li>
+  <li><b>Into Rekordbox</b> (optional): drag the library folder into Rekordbox's Collection, and see <a href="#faq-xml">the XML FAQ</a> to bring BPM, key and My Tags back.</li>
+</ol>
+<p>macOS may also ask once whether DJ Crate can use your Keychain (where your Spotify login is kept): enter your password and choose <b>Always Allow</b>.</p>
+
 <h2 id="philosophy">Philosophy</h2>
 <ul class="principles">
   <li><b>The DJ decides.</b> There is no recommendation algorithm, no "next song" suggestions and no auto-mixing, and there won't be. DJ Crate remembers what <i>you</i> found (your mixes, samples, notes and sets) and makes it easy to find again. It gives facts such as BPM, key and what samples what. It never picks for you.</li>
@@ -111,6 +126,23 @@
   <li>In that section, right-click a playlist → <b>Import Playlist</b>. Do it again after changing a crate.</li>
 </ol>
 <p>Crates become playlists and sets become playlists in main-path order. Only playlists are sent: never BPM, key, grids, cues, notes or tags, so nothing in Rekordbox can be overwritten. Songs are matched by file path, so there are no duplicates.</p>
+
+<h3 id="faq-spotify">Spotify setup says "Invalid redirect URI" or "not on the user list"</h3>
+<ul>
+  <li><b>INVALID_CLIENT: Invalid redirect URI:</b> in your app on <code>developer.spotify.com/dashboard</code>, add exactly <code>http://127.0.0.1:8765/callback</code> (Settings → Spotify has a Copy button), save, and log in again.</li>
+  <li><b>Not on this app's user list:</b> someone else's Spotify developer app is being used. In that dashboard, open the app → <b>User Management</b> and add your Spotify email, or make your own app.</li>
+  <li>Spotify only lets apps read playlists <b>you own or collaborate on</b>, plus Liked Songs. For anyone else's, copy its songs into a new playlist of your own.</li>
+</ul>
+
+<h3 id="faq-cookies">YouTube says "Sign in to confirm you're not a bot". What do cookies do?</h3>
+<p>Some videos (age-restricted ones, or when YouTube gets suspicious) only download when you're signed in. <b>Settings → Downloads → Use cookies from browser</b> lets DJ Crate use the YouTube sign-in from a browser on this Mac.</p>
+<ol>
+  <li>Sign in to youtube.com in that browser (Chrome, Safari, Firefox, Brave, Edge…) and play any video once.</li>
+  <li>Pick the browser in Settings. If it has several profiles, pick the one signed in to YouTube. DJ Crate tests it right away.</li>
+  <li><b>Chrome, Brave, Edge:</b> macOS asks whether DJ Crate may use "Chrome Safe Storage". Enter your Mac password and choose <b>Always Allow</b> (choosing Deny is the usual reason cookies "don't work").</li>
+  <li><b>Safari:</b> needs Full Disk Access. System Settings → Privacy &amp; Security → Full Disk Access → turn on DJ Crate.</li>
+</ol>
+<p>DJ Crate keeps only YouTube and Google cookies, in a private file on this Mac, and reads them again every few hours. Turning cookies off deletes that file.</p>
 
 <h2 id="backups">Backups and a new Mac</h2>
 <p>You need two separate backups: the <b>library folder</b> (every MP3 plus DJ Crate's data in <code>.djcrate/</code>), and <b>Rekordbox's own backup</b> (cues, grids, playlists, My Tags: File → Library → Backup Library). DJ Crate also saves its database every day, keeping the last 14, and <a href="#" data-tab="settings">Settings</a> can export and import your crates.</p>

@@ -2,8 +2,9 @@
 
 import { del, get, native, patch, post, put } from "./api.js";
 import { openDocsAt } from "./docs.js";
+import { showOnboarding } from "./onboarding.js";
 import { emit, store } from "./store.js";
-import { confirmDialog, copyText, errorToast, h, modal, toast } from "./ui.js";
+import { confirmDialog, copyText, errorToast, fill, h, modal, toast, toolOutput } from "./ui.js";
 
 const root = () => document.getElementById("view-settings");
 
@@ -132,8 +133,36 @@ export async function showSettings() {
 
   // ---- Downloads
   const browser = h("select", {}, s.cookie_browsers.map((b) => h("option", { value: b, selected: b === s.cookies_browser }, b ? b[0].toUpperCase() + b.slice(1) : "Off")));
+  const cookieResult = h("div", { class: "cookie-result" });
+  const testBtn = h("button", { class: "btn small", hidden: !s.cookies_browser }, "Test");
+  // Reads the browser's YouTube cookies now. For Chrome-like browsers macOS asks for Keychain access once.
+  const testCookies = async () => {
+    testBtn.disabled = true;
+    cookieResult.replaceChildren(h("span", { class: "muted small" }, "Reading cookies… if macOS asks for Keychain access, enter your password and choose Always Allow."));
+    try {
+      const r = await post("/api/cookies/test");
+      fill(cookieResult,
+        h("span", { class: "small", style: { color: r.ok ? "var(--green)" : "var(--red)" } }, r.ok ? "✓ " : "✗ ", r.message),
+        r.output && !r.ok ? toolOutput(r.output, "cookie-test") : null);
+    } catch (e) { cookieResult.replaceChildren(); errorToast(e); } finally { testBtn.disabled = false; }
+  };
+  testBtn.onclick = testCookies;
+  const profile = h("select", { hidden: (s.cookie_profiles || []).length < 2 },
+    h("option", { value: "", selected: !s.cookies_profile }, "Most recently used profile"),
+    (s.cookie_profiles || []).map((p) => h("option", { value: p.id, selected: p.id === s.cookies_profile }, p.name)));
+  profile.addEventListener("change", async () => {
+    try { await patch("/api/settings", { cookies_profile: profile.value }); testCookies(); } catch (e) { errorToast(e); }
+  });
   browser.addEventListener("change", async () => {
-    try { await patch("/api/settings", { cookies_browser: browser.value }); toast("Saved.", { type: "success" }); } catch (e) { errorToast(e); }
+    try {
+      const r = await patch("/api/settings", { cookies_browser: browser.value });
+      const profs = r.settings.cookie_profiles || [];
+      fill(profile, h("option", { value: "" }, "Most recently used profile"), profs.map((p) => h("option", { value: p.id }, p.name)));
+      profile.hidden = profs.length < 2;
+      testBtn.hidden = !browser.value;
+      cookieResult.replaceChildren();
+      if (browser.value) testCookies(); else toast("Cookies off.", { type: "success" });
+    } catch (e) { errorToast(e); }
   });
   const aheadInput = h("input", { type: "number", min: "0", max: String(s.search_ahead_max), value: String(s.search_ahead), style: { width: "70px" } });
   aheadInput.addEventListener("change", async () => {
@@ -151,19 +180,20 @@ export async function showSettings() {
   const updateBtn = h("button", { class: "btn" }, "Update yt-dlp");
   updateBtn.onclick = () => updateYtdlp(updateBtn).then(showSettings);
   const downloadsCard = card("Downloads",
-    h("div", { class: "line" }, "ffmpeg: ", s.ffmpeg ? h("span", { style: { color: "var(--green)" } }, `found (${s.ffmpeg})`) : h("span", { style: { color: "var(--red)" } }, "not found — run brew install ffmpeg"),
+    h("div", { class: "line" }, "ffmpeg: ", s.ffmpeg ? h("span", { style: { color: "var(--green)" } }, `found (${s.ffmpeg})`) : h("span", { style: { color: "var(--red)" } }, s.install === "app" ? "missing — download DJ Crate again and replace the app" : "not found — run brew install ffmpeg"),
       h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); showSettings(); } }, "Re-check")),
     h("div", { class: "line" }, "yt-dlp: ", h("code", {}, s.ytdlp || "not working"), updateBtn),
     h("div", { class: "line" }, "JavaScript runtime: ", s.js_runtime
       ? h("span", { style: { color: "var(--green)" } }, `${s.js_runtime} (${s.js_runtime_path})`)
-      : h("span", { style: { color: "var(--red)" } }, "not found — run brew install deno"),
+      : h("span", { style: { color: "var(--red)" } }, s.install === "app" ? "missing — download DJ Crate again and replace the app" : "not found — run brew install deno"),
       h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); showSettings(); } }, "Re-check")),
     h("p", { class: "muted small" }, "YouTube needs yt-dlp to run a bit of JavaScript. Without Deno or Node, some audio formats go missing and downloads fail more often."),
     h("p", { class: "muted small" }, "YouTube changes things often. If downloads start failing, Update yt-dlp usually fixes it."),
     h("div", { class: "line" }, "Search ahead: ", aheadInput, " songs", h("span", { class: "muted small" }, `(0 = off, max ${s.search_ahead_max})`)),
     h("p", { class: "muted small" }, "When you open Find on a song, DJ Crate quietly searches the next few songs too, so theirs open instantly. More than 10 gets you rate-limited by YouTube."),
-    h("div", { class: "line" }, "Use cookies from browser: ", browser),
-    h("p", { class: "muted small" }, "Only needed for age-restricted videos or “confirm you're not a bot” errors. Uses your logged-in YouTube session from that browser."),
+    h("div", { class: "line" }, "Use cookies from browser: ", browser, profile, testBtn),
+    cookieResult,
+    h("p", { class: "muted small" }, "Only needed for age-restricted videos or “confirm you're not a bot” errors. Uses your logged-in YouTube session from that browser: DJ Crate reads only its YouTube and Google cookies, every few hours, and keeps them on this Mac."),
     h("p", { class: "muted small" }, "Files are saved as “Title - Artist.mp3” (MP3, constant 192 kbps — steady cue points on CDJs) in the library folder."));
 
   // ---- Backups
@@ -187,10 +217,41 @@ export async function showSettings() {
     h("div", { class: "line" },
       h("button", { class: "btn", onclick: () => post("/api/reveal", { target: "logs" }) }, "Open logs"),
       h("span", { class: "muted small" }, s.log_dir)),
-    h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")),
-    h("p", { class: "muted small" }, `DJ Crate ${store.status?.version || ""}`));
+    h("div", { class: "line" }, `Port: ${s.port}`, h("button", { class: "btn small", onclick: changePort }, "Change…")));
 
-  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, cleanCard, libraryCard, downloadsCard, backupsCard, troubleCard));
+  root().replaceChildren(h("div", { class: "settings" }, spotifyCard, geniusCard, rbCard, cleanCard, libraryCard, downloadsCard, backupsCard, troubleCard, aboutCard(s, card)));
+}
+
+// ---- About: version and update check
+function aboutCard(s, card) {
+  const up = store.status?.update || {};
+  const line = h("span", {});
+  const describe = (u) => line.replaceChildren(u.offline ? h("span", { class: "muted" }, "Couldn't check: you're offline.") : u.available
+    ? h("span", {}, h("b", {}, `${u.latest} is out. `),
+      h("button", { class: "btn small primary", onclick: () => post("/api/open_url", { url: u.url }) }, u.install === "app" ? "Download" : "What's new"))
+    : h("span", { class: "muted" }, u.latest ? "Up to date." : u.checked_at ? "Up to date (no releases yet)." : "Not checked yet."));
+  describe(up);
+  const check = h("button", { class: "btn small" }, "Check now");
+  check.onclick = async () => {
+    check.disabled = true;
+    try { const u = await post("/api/update/check"); describe(u); emit("poll"); } catch (e) { errorToast(e); } finally { check.disabled = false; }
+  };
+  const auto = h("input", { type: "checkbox", class: "sel", checked: s.update_check });
+  auto.addEventListener("change", async () => {
+    try { await patch("/api/settings", { update_check: auto.checked }); } catch (e) { errorToast(e); auto.checked = !auto.checked; }
+  });
+  const link = (url, text) => h("a", { href: "#", onclick: (e) => { e.preventDefault(); post("/api/open_url", { url }); } }, text);
+  return card("About",
+    h("div", { class: "line" }, h("b", {}, `DJ Crate ${s.version || store.status?.version || ""}`), line, check),
+    h("label", { class: "row gap", style: { cursor: "pointer" } }, auto, "Check for new versions (once a day, asks GitHub; nothing is sent about you)"),
+    h("p", { class: "muted small" }, s.install === "app"
+      ? "To update, download the new version and replace the app. Your music, crates and settings live outside the app and are kept."
+      : "You're running from the source code: update with scripts/update.sh."),
+    h("div", { class: "line" }, h("button", { class: "btn small", onclick: () => { showOnboarding(); emit("show-tab", "crates"); } }, "Setup guide"),
+      h("button", { class: "btn small", onclick: () => openDocsAt("start") }, "Getting started (Docs)")),
+    h("p", { class: "muted small" }, link("https://adriatogi.github.io/DJ-Crate/", "Website"), " · ",
+      link("https://github.com/Adriatogi/DJ-Crate", "GitHub"), " · ",
+      link("https://github.com/Adriatogi/DJ-Crate/issues", "Report a problem"), " · Free and open source (GPL-3.0)"));
 }
 
 export async function updateYtdlp(btn) {

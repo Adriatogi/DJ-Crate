@@ -166,8 +166,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs/Zensical documentation
-/site
 
 # mypy
 .mypy_cache/
@@ -231,3 +229,7 @@ rekorbox_to_dj_crate.xml
 
 # Local research files (test MP3s are copyrighted: never commit)
 research/
+
+# Release builds
+/dist/
+/build/

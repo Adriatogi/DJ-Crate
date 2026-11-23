@@ -35,8 +35,10 @@ export async function showDocs() {
     const a = e.target.closest("a");
     if (!a) return;
     e.preventDefault();
+    const href = a.getAttribute("href") || "";
     if (a.dataset.tab) emit("show-tab", a.dataset.tab);
-    else if (/^https?:/.test(a.getAttribute("href") || "")) api("POST", "/api/open_url", { url: a.href });
+    else if (href.startsWith("#")) article.querySelector(href)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    else if (/^https?:/.test(href)) api("POST", "/api/open_url", { url: a.href });
   });
   root().replaceChildren(h("div", { class: "docs-wrap" }, toc, article));
   loaded = true;

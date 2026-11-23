@@ -261,7 +261,7 @@ function statusCell(t) {
 
 function shortError(t) {
   return {
-    unavailable: "Unavailable", needs_cookies: "Needs sign-in", ytdlp_outdated: "Update yt-dlp", no_formats: "No audio offered", invalid_url: "Bad link",
+    unavailable: "Unavailable", needs_cookies: "Needs sign-in", cookies_failed: "Cookies", ytdlp_outdated: "Update yt-dlp", no_formats: "No audio offered", invalid_url: "Bad link",
     transient: "Network", disk_full: "Disk full", ffmpeg_missing: "No ffmpeg",
   }[t.error_code] || "Failed";
 }

@@ -17,8 +17,12 @@ from pathlib import Path
 
 log = logging.getLogger("djcrate.tools")
 
+from . import config
+
+# The downloadable app carries its own ffmpeg, ffprobe and deno; they come first.
+BUNDLED_BIN = str(config.BUNDLE_DIR / "Contents" / "Resources" / "bin") if config.BUNDLED else None
 EXTRA_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin"), str(Path.home() / ".cargo" / "bin")]
-SEARCH_PATH = os.pathsep.join([os.environ.get("PATH", ""), *EXTRA_PATHS])
+SEARCH_PATH = os.pathsep.join([*([BUNDLED_BIN] if BUNDLED_BIN else []), os.environ.get("PATH", ""), *EXTRA_PATHS])
 
 _ytdlp_version: str | None = None
 _online_cache: tuple[float, bool] = (0.0, True)
@@ -42,7 +46,6 @@ def ffmpeg_dir() -> str | None:
 # the update. Whichever copy is newer (the updated one or the project's own) is used.
 
 def updated_ytdlp_dir() -> Path:
-    from . import config
     return config.APP_SUPPORT_DIR / "yt-dlp"
 
 
@@ -68,12 +71,20 @@ def _bundled_version() -> str | None:
         return None
 
 
-def _ytdlp_base(d: Path | None = None) -> list[str]:
+def ytdlp_python_prefix(d: Path | None = None) -> str:
+    """Python code that makes `import yt_dlp` pick the updated copy when it's the newer one."""
     d = d or updated_ytdlp_dir()
     updated = _updated_version(d)
     if updated and _version_key(updated) >= _version_key(_bundled_version()):
+        return f"import sys; sys.path.insert(0, {str(d)!r}); "
+    return ""
+
+
+def _ytdlp_base(d: Path | None = None) -> list[str]:
+    prefix = ytdlp_python_prefix(d)
+    if prefix:
         # Run the updated copy: its folder goes first on the import path.
-        return [sys.executable, "-c", f"import sys; sys.path.insert(0, {str(d)!r}); import yt_dlp; yt_dlp.main()"]
+        return [sys.executable, "-c", prefix + "import yt_dlp; yt_dlp.main()"]
     return [sys.executable, "-m", "yt_dlp"]
 
 

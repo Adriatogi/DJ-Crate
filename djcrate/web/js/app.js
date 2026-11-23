@@ -7,6 +7,7 @@ import { autofillProgress, initCrates, refreshSidebar, refreshTracks, selectView
 import { closeDetail } from "./detail.js";
 import { showCutting } from "./cutting.js";
 import { showDocs } from "./docs.js";
+import { renderOnboarding } from "./onboarding.js";
 import { showSets } from "./sets.js";
 import { showSettings, updateYtdlp } from "./settings.js";
 import { emit, on, store } from "./store.js";
@@ -89,6 +90,7 @@ async function poll() {
   renderStrip(s);
   renderProgress(s);
   renderBanners(s);
+  renderOnboarding(s);
   if (libStatus === "ok") {
     const q = s.queue;
     const key = `${q.queued}|${q.running}|${q.failed}|${q.interrupted}`;
@@ -242,13 +244,29 @@ function renderBanners(s) {
       `Read-only: this library is also open on ${s.library.lock_info?.host || "another Mac"}. Changes are off so nothing gets corrupted.`,
       h("button", { class: "btn small", onclick: async () => { await post("/api/library/take_over"); location.reload(); } }, "Take over")));
   }
+  const recheck = () => h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); poll(); } }, "Re-check");
+  // The downloadable app carries ffmpeg and deno inside it, so missing ones mean a damaged copy.
+  const fix = (tool) => s.install === "app" ? ["Download DJ Crate again and replace the app (your music and crates are kept), then"]
+    : ["In Terminal run ", h("code", {}, `brew install ${tool}`), ", then"];
+  if (s.translocated) {
+    b.push(h("div", { class: "banner warn" }, "DJ Crate is running from your Downloads. Drag it into your Applications folder and open it from there, so it can find its own files and update cleanly."));
+  }
   if (!s.tools.ffmpeg) {
-    b.push(h("div", { class: "banner bad" }, "ffmpeg isn't installed, so downloads are paused. In Terminal run ", h("code", {}, "brew install ffmpeg"), ", then",
-      h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); poll(); } }, "Re-check")));
+    b.push(h("div", { class: "banner bad" }, "ffmpeg is missing, so downloads are paused. ", ...fix("ffmpeg"), recheck()));
   }
   if (!s.tools.js) {
-    b.push(h("div", { class: "banner warn" }, "yt-dlp has no JavaScript runtime, so YouTube downloads may miss formats or fail. In Terminal run ", h("code", {}, "brew install deno"), ", then",
-      h("button", { class: "btn small", onclick: async () => { await post("/api/tools/recheck"); poll(); } }, "Re-check")));
+    b.push(h("div", { class: "banner warn" }, "yt-dlp has no JavaScript runtime, so YouTube downloads may miss formats or fail. ", ...fix("deno"), recheck()));
+  }
+  const up = s.update;
+  if (up?.available && localStorage.getItem("djcrate.dismissed_update") !== up.latest) {
+    const dismiss = h("button", { class: "btn small", title: "Hide until the next version" }, "Later");
+    dismiss.onclick = () => { localStorage.setItem("djcrate.dismissed_update", up.latest); renderBanners(s); };
+    b.push(h("div", { class: "banner info" }, `DJ Crate ${up.latest} is out (you have ${up.current}).`,
+      up.install === "app"
+        ? h("button", { class: "btn small primary", onclick: () => post("/api/open_url", { url: up.url }) }, "Download")
+        : h("span", {}, " Update with ", h("code", {}, "scripts/update.sh"), " ",
+          h("button", { class: "btn small", onclick: () => post("/api/open_url", { url: up.url }) }, "What's new")),
+      dismiss));
   }
   if (s.queue.outdated) {
     const btn = h("button", { class: "btn small primary" }, "Update yt-dlp");

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from . import db, library, tags, tools
+from . import config, cookies as browser_cookies, db, library, tags, tools
 
 log = logging.getLogger("djcrate.downloader")
 
@@ -39,12 +39,16 @@ ALLOWED_HOSTS = re.compile(
 ERROR_MESSAGES = {
     "unavailable": "Video unavailable (removed, private or blocked in your country) — paste a new link.",
     "needs_cookies": "YouTube wants you signed in (age-restricted or bot check). Turn on Settings → Use cookies from browser, then Retry.",
+    "needs_cookies_on": ("YouTube still wants you signed in, even with your browser's cookies. In that browser, make sure you're "
+                         "signed in to YouTube (and open a video once), then Settings → Use cookies from browser → Test, and Retry."),
+    "cookies_failed": "Couldn't read your browser's cookies.",
     "ytdlp_outdated": "YouTube changed something and the downloader needs an update. Click Update yt-dlp, then Retry.",
     "no_formats": "YouTube didn't offer any audio to download for this video. Retry later, or paste a different link for this song.",
     "transient": "Network problem while downloading.",
     "rate_limited": "YouTube is rate-limiting you right now — wait a few minutes.",
     "forbidden": "YouTube refused the download (HTTP 403).",
-    "ffmpeg_missing": "ffmpeg isn't installed. Run: brew install ffmpeg",
+    "ffmpeg_missing": ("ffmpeg is missing from the app. Download DJ Crate again and replace the app." if config.BUNDLED
+                       else "ffmpeg isn't installed. Run: brew install ffmpeg"),
     "disk_full": "Not enough disk space.",
     "invalid_url": "That link isn't a supported YouTube/SoundCloud/Bandcamp link.",
     "no_link": "This song has no link yet — paste one first.",
@@ -106,7 +110,8 @@ def _no_formats_message(lines: list[str], cookies: str) -> str:
     low = "\n".join(lines).lower()
     if "javascript runtime" in low or "js runtime" in low or not tools.js_runtime():
         return ("YouTube didn't offer any audio because no JavaScript runtime was found. "
-                "Run: brew install deno, then Re-check in Settings and Retry.")
+                + ("Download DJ Crate again and replace the app, then Retry." if config.BUNDLED
+                   else "Run: brew install deno, then Re-check in Settings and Retry."))
     if cookies:
         return ("YouTube didn't offer any audio for this video while signed in with your browser cookies "
                 "(it was also tried without them). Retry later, or paste a different link.")
@@ -378,7 +383,8 @@ class DownloadManager:
             conn = self.state.conn()
             try:
                 track = db.get_track(conn, job["track_id"])
-                cookies = db.get_setting(conn, "cookies_browser", "")
+                browser = db.get_setting(conn, "cookies_browser", "")
+                profile = db.get_setting(conn, "cookies_profile", "") if browser else ""
             finally:
                 conn.close()
             if not track:
@@ -392,9 +398,18 @@ class DownloadManager:
                 raise _Failure("invalid_url", url)
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir(parents=True)
+            cookies = ""
+            if browser:
+                try:
+                    cookies = browser_cookies.copy_for_job(browser, profile, tmp / "cookies.txt")
+                except browser_cookies.CookieError as e:
+                    raise _Failure("cookies_failed", e.message, e.message, e.output)
             try:
                 mp3 = self._fetch(job_id, url, tmp, cookies)
             except _Failure as f:
+                if f.code == "needs_cookies" and cookies:
+                    browser_cookies.mark_stale(browser, profile)   # read the browser again next time
+                    raise _Failure(f.code, f.detail, ERROR_MESSAGES["needs_cookies_on"], f.output)
                 if f.code != "no_formats" or not cookies:
                     raise
                 # Signed-in sessions sometimes get no formats where a plain request does: try once without cookies.
@@ -446,7 +461,7 @@ class DownloadManager:
             "-o", str(tmp / "source.%(ext)s"),
         ]
         if cookies:
-            cmd += ["--cookies-from-browser", cookies]
+            cmd += ["--cookies", cookies]   # a copy of the browser's YouTube cookies (see cookies.py)
         cmd += ["--", url]
         log.info("Job %s: downloading %s", job_id, url)
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,

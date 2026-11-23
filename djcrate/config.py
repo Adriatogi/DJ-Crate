@@ -8,6 +8,8 @@ import json
 import logging
 import logging.handlers
 import os
+import sys
+import threading
 from pathlib import Path
 
 from . import APP_NAME
@@ -17,8 +19,30 @@ LOG_DIR = Path(os.environ.get("DJCRATE_LOG_DIR", Path.home() / "Library" / "Logs
 CONFIG_PATH = APP_SUPPORT_DIR / "config.json"
 
 REPO_DIR = Path(__file__).resolve().parent.parent
-# Everything lives inside the DJ-Crate folder: code, the app, and libraries.
-LIBRARIES_DIR = Path(os.environ.get("DJCRATE_LIBRARIES_DIR", REPO_DIR / "Libraries"))
+
+
+def find_bundle() -> Path | None:
+    """The DJ Crate.app we're running from (the downloadable app), or None for a source checkout.
+    The app's launcher sets DJCRATE_BUNDLE; otherwise look for our Python inside an .app."""
+    env = os.environ.get("DJCRATE_BUNDLE")
+    if env:
+        return Path(env)
+    exe = Path(sys.executable).resolve()
+    for parent in exe.parents:
+        if parent.suffix == ".app" and exe.is_relative_to(parent / "Contents" / "Resources" / "python"):
+            return parent
+    return None
+
+
+BUNDLE_DIR = find_bundle()
+BUNDLED = BUNDLE_DIR is not None
+# macOS runs a just-downloaded app from a random read-only copy until it's moved to Applications.
+TRANSLOCATED = BUNDLED and "/AppTranslocation/" in str(BUNDLE_DIR)
+
+# A source checkout keeps libraries next to the code; the app keeps them in ~/Music
+# (outside the app, so replacing the app with a new version never touches them).
+LIBRARIES_DIR = Path(os.environ.get(
+    "DJCRATE_LIBRARIES_DIR", Path.home() / "Music" / APP_NAME if BUNDLED else REPO_DIR / "Libraries"))
 DEFAULT_LIBRARY = LIBRARIES_DIR / "My Library"
 DEFAULT_PORT = 8765
 
@@ -35,18 +59,23 @@ def load_config() -> dict:
         return {}
 
 
+_write_lock = threading.RLock()   # the update check and Settings can both write config.json
+
+
 def save_config(cfg: dict) -> None:
-    APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cfg, indent=2))
-    tmp.replace(CONFIG_PATH)
+    with _write_lock:
+        APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CONFIG_PATH.with_name(f"config.{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(cfg, indent=2))
+        tmp.replace(CONFIG_PATH)
 
 
 def update_config(**changes) -> dict:
-    cfg = load_config()
-    cfg.update(changes)
-    save_config(cfg)
-    return cfg
+    with _write_lock:
+        cfg = load_config()
+        cfg.update(changes)
+        save_config(cfg)
+        return cfg
 
 
 def get_port() -> int:

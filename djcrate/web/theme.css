@@ -1,0 +1,107 @@
+/* DJ Crate theme: the one place to change the app's (and the website's) colors.
+   The app loads this before styles.css, and the website loads it too.
+   styles.css should only ever use these variables, never raw color values. */
+:root {
+  /* ---- core palette */
+  --bg: #121214;
+  --bg-2: #18181c;
+  --bg-3: #202026;
+  --bg-4: #2a2a32;
+  --line: #2e2e36;
+  --line-2: #3a3a46;          /* popover / panel borders */
+  --line-dashed: #3a3a44;     /* empty link input */
+  --text: #e9e9ee;
+  --text-soft: #cfcfd8;       /* docs body text */
+  --text-dim: #c6c6d0;        /* overlay card text */
+  --text-2: #b9b9c4;          /* secondary text (settings, docs) */
+  --muted: #8d8d99;
+  --bright: #ffffff;          /* white: text on accent/red/green, selected wire */
+  --accent: #7c5cff;
+  --accent-2: #9d85ff;
+  --green: #2fd17a;
+  --spotify: #1db954;
+  --yellow: #ffc542;
+  --red: #ff5c63;
+  --blue: #4fb3ff;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+
+  /* ---- neutrals: controls, rows, surfaces */
+  --btn-hover: #34343e;
+  --checkbox-line: #5d5d6b;
+  --row-line: #1e1e24;
+  --row-hover: #17171c;
+  --row-selected: #1d1934;
+  --row-open: #1f1f28;
+  --player-bg: #191624;
+  --timeline-free: #17151f;
+  --neutral-tint: #2c2c34;    /* "removed" chip, board grid dots */
+  --toast-bg: #2b2b35;
+  --toast-line: #3c3c48;
+  --underline: #ffffff55;     /* hover underline on clickable cells */
+
+  /* ---- board (mix map) */
+  --board-bg: #17171b;
+  --node-bg: #2a2a31;
+  --node-line: #3c3c46;
+  --node-line-hover: #55556a;
+  --port-bg: #1c1c22;
+  --port-line: #8a8aa0;
+  --wire: #6b6b80;
+  --wire-dim: #4a4a58;
+
+  /* ---- accent family */
+  --accent-tint: #241e45;     /* busy chip, selected list item */
+  --accent-drop: #2a2350;     /* drag-and-drop target */
+  --accent-bar: #221d3d;      /* bulk-selection bar */
+  --accent-bar-line: #3a3266;
+  --accent-muted: #3b3366;    /* primary button with nothing to link */
+  --accent-muted-text: #b9b0e8;
+  --accent-ring: #7c5cff55;
+  --accent-node: #2d2840;
+  --accent-note: #c9c3ea;
+  --mix-node-bg: #262234;
+  --mix-node-line: #4a3f7a;
+
+  /* ---- green family */
+  --green-dark: #1f8f52;
+  --on-green: #0b1f14;        /* text on a green background */
+  --on-spotify: #06150c;
+  --green-tint: #143323;
+  --green-tint-soft: rgba(47, 209, 122, .15);
+  --green-line: #2c6e48;
+  --green-close-bg: #13261b;
+  --green-close-hover: #183222;
+  --green-toast-line: #255c3d;
+
+  /* ---- red family */
+  --red-tint: #3a1719;
+  --red-text: #ffc7ca;
+  --red-text-2: #ffb3b7;
+  --red-line: #5a2a2e;
+  --red-hover: #3a1d20;
+  --red-ring: #ff5c6333;
+  --red-toast-bg: #331b1e;
+  --red-toast-line: #6a2a30;
+
+  /* ---- yellow family */
+  --yellow-tint: #3a2f12;
+  --yellow-text: #ffe2a0;
+  --yellow-toast-bg: #2f2814;
+  --yellow-toast-line: #6a5420;
+  --yellow-node-bg: #2b2618;
+  --yellow-node-line: #5c4d22;
+
+  /* ---- blue family */
+  --blue-tint: #1c2340;
+  --blue-text: #c9d4ff;
+
+  /* ---- shadows and scrims (black at various opacities) */
+  --shadow-tip: rgba(0, 0, 0, .45);
+  --shadow-soft: #0007;
+  --shadow: #0008;
+  --shadow-mid: #0009;
+  --shadow-strong: #000a;
+  --scrim: #000b;             /* behind overlays */
+  --shadow-deep: #000c;
+}

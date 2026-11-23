@@ -193,6 +193,7 @@ def test_no_formats_is_not_called_outdated(monkeypatch):
 def test_no_formats_with_cookies_tries_once_without(dm, lib, make_mp3, monkeypatch):
     conn, tid = add_track(lib)
     db.set_setting(conn, "cookies_browser", "chrome")
+    fake_cookies(monkeypatch, lib)
     tried = []
 
     def fetch(job_id, url, tmp, cookies):
@@ -204,7 +205,70 @@ def test_no_formats_with_cookies_tries_once_without(dm, lib, make_mp3, monkeypat
     monkeypatch.setattr(dm, "_fetch", fetch)
     dm.enqueue(conn, [tid])
     run_one(dm)
-    assert tried == ["chrome", ""] and db.get_track(conn, tid)["download_status"] == "done"
+    assert tried[0].endswith("cookies.txt") and tried[1] == "" and db.get_track(conn, tid)["download_status"] == "done"
+
+
+def fake_cookies(monkeypatch, lib, fail=None):
+    """Pretend the browser's cookies were read (or fail to be) without touching a real browser."""
+    from djcrate import cookies
+    src = lib.library / "fake-cookies.txt"
+    src.write_text("# Netscape HTTP Cookie File\n")
+    calls = []
+
+    def copy_for_job(browser, profile, dest):
+        calls.append((browser, profile))
+        if fail:
+            raise cookies.CookieError(fail, cookies.MESSAGES[fail].format(name="Chrome"), "WARNING: cannot decrypt v10 cookies: no key found")
+        dest.write_text(src.read_text())
+        return str(dest)
+    monkeypatch.setattr(cookies, "copy_for_job", copy_for_job)
+    return calls
+
+
+def test_downloads_use_a_copy_of_the_cookies_not_the_browser(dm, lib, make_mp3, monkeypatch):
+    conn, tid = add_track(lib)
+    db.set_setting(conn, "cookies_browser", "chrome")
+    db.set_setting(conn, "cookies_profile", "Profile 1")
+    calls = fake_cookies(monkeypatch, lib)
+    seen = []
+
+    def fetch(job_id, url, tmp, cookies):
+        seen.append(cookies)
+        assert (tmp / "cookies.txt").exists()
+        return make_mp3(tmp / "audio.mp3")
+    monkeypatch.setattr(dm, "_fetch", fetch)
+    dm.enqueue(conn, [tid])
+    run_one(dm)
+    assert calls == [("chrome", "Profile 1")] and seen[0].endswith("cookies.txt")
+
+
+def test_cookie_read_failure_explains_itself(dm, lib, monkeypatch):
+    conn, tid = add_track(lib)
+    db.set_setting(conn, "cookies_browser", "chrome")
+    fake_cookies(monkeypatch, lib, fail="keychain")
+    monkeypatch.setattr(dm, "_fetch", lambda *a: pytest.fail("shouldn't download without the cookies"))
+    dm.enqueue(conn, [tid])
+    job = run_one(dm)
+    row = conn.execute("SELECT error_code, error_msg, error_detail FROM jobs WHERE id = ?", (job["id"],)).fetchone()
+    assert row["error_code"] == "cookies_failed" and "Always Allow" in row["error_msg"]
+    assert "no key found" in row["error_detail"]
+
+
+def test_still_asked_to_sign_in_rereads_cookies_next_time(dm, lib, monkeypatch):
+    from djcrate import cookies
+    conn, tid = add_track(lib)
+    db.set_setting(conn, "cookies_browser", "chrome")
+    fake_cookies(monkeypatch, lib)
+    stale = []
+    monkeypatch.setattr(cookies, "mark_stale", lambda b, p="": stale.append(b))
+
+    def fetch(job_id, url, tmp, c):
+        raise _Failure("needs_cookies", "Sign in to confirm you're not a bot")
+    monkeypatch.setattr(dm, "_fetch", fetch)
+    dm.enqueue(conn, [tid])
+    job = run_one(dm)
+    msg = conn.execute("SELECT error_msg FROM jobs WHERE id = ?", (job["id"],)).fetchone()[0]
+    assert stale == ["chrome"] and "even with your browser's cookies" in msg
 
 
 def test_failed_download_keeps_what_ytdlp_said(dm, lib, monkeypatch):
