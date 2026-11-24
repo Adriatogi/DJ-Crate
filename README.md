@@ -2,7 +2,7 @@
 
 <img src="site/assets/logo.png" alt="DJ Crate logo" width="96">
 
-> **[ADRIAN: intro]**
+**Basically an app to download your music and get it ready for djing (spotify to rekordbox specifically, although soon-ish we'd support other workflows. Kinda already do). But yeah, you can download your music, explore it, catalog it, build sets, take notes on songs, download other songs not on spotify, etc. Will work on this descirption lol! But if you DJ, want your songs locally and set up for rekordbox, and its easy to use (hopefully). This is it. No seriously, if you've used yt-dlp and had to do it yourself, you'd understand where this comes from.**
 
 Website: https://adriatogi.github.io/DJ-Crate/
 
@@ -108,7 +108,7 @@ Python 3.12–3.13, FastAPI on `127.0.0.1:8765` in a pywebview window, SQLite at
 
 ## Support
 
-> **[ADRIAN: support pitch]**
+**I work on this in my own time on my own resources so yeah. Just for the love of the game, so I wouldn't mind a bit of support. Literally and probably for a cofee in the morning. Maybe a cookie.**
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/ADRIAN-LINK)
 
