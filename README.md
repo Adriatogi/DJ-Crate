@@ -2,7 +2,6 @@
 
 <img src="site/assets/logo.png" alt="DJ Crate logo" width="96">
 
-<!-- ADRIAN: intro. A few lines on what DJ Crate is and why it exists. -->
 > **[ADRIAN: intro]**
 
 Website: https://adriatogi.github.io/DJ-Crate/
@@ -109,10 +108,8 @@ Python 3.12–3.13, FastAPI on `127.0.0.1:8765` in a pywebview window, SQLite at
 
 ## Support
 
-<!-- ADRIAN: support pitch. A line or two asking for a coffee. -->
 > **[ADRIAN: support pitch]**
 
-<!-- ADRIAN: replace ADRIAN-LINK with your Buy Me a Coffee username. -->
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/ADRIAN-LINK)
 
 ## License
