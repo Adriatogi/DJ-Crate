@@ -126,17 +126,6 @@ h3 { font-size: 1.1rem; }
 }
 .card p { margin: 0; color: var(--muted); }
 
-/* Screenshots */
-.shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.shot, .shots img {
-  aspect-ratio: 16 / 10;
-  width: 100%;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--bg-3);
-}
-.shot { display: flex; align-items: center; justify-content: center; padding: 12px; text-align: center; }
-.shots img { object-fit: cover; }
 
 /* Steps */
 .steps, .install { padding-left: 0; list-style: none; counter-reset: step; }
@@ -183,11 +172,11 @@ h3 { font-size: 1.1rem; }
 
 /* Responsive */
 @media (max-width: 900px) {
-  .grid, .shots { grid-template-columns: repeat(2, 1fr); }
+  .grid { grid-template-columns: repeat(2, 1fr); }
   .steps { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 600px) {
-  .grid, .shots, .steps { grid-template-columns: 1fr; }
+  .grid, .steps { grid-template-columns: 1fr; }
   .header-inner { justify-content: center; padding-top: 10px; padding-bottom: 10px; }
   .nav { justify-content: center; gap: 14px; }
   .site-header { position: static; }
